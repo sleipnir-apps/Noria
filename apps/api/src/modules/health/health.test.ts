@@ -14,7 +14,7 @@ describe("Health route", () => {
   });
 
   it("GET /health retourne 200 avec database connected", async () => {
-    const res = await app.inject({ method: "GET", url: "/health" });
+    const res = await app.inject({ method: "GET", url: "/api/v1/health" });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();

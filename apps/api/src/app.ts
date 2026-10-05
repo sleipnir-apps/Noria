@@ -10,6 +10,7 @@ import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
 import { itemRoutes } from "./modules/items/item.routes";
+import { taskRoutes } from "./modules/tasks/task.routes";
 
 export async function buildApp() {
   const app = Fastify({
@@ -39,11 +40,17 @@ export async function buildApp() {
   // Error handler (après les plugins)
   registerErrorHandler(app);
 
-  // Routes
-  await app.register(healthRoutes);
-  await app.register(authRoutes);
-  await app.register(adminRoutes);
-  await app.register(itemRoutes);
+  // All v1 payload routes live under the /api/v1 prefix (mobile clients pin it).
+  await app.register(
+    async (apiV1) => {
+      await apiV1.register(healthRoutes);
+      await apiV1.register(authRoutes);
+      await apiV1.register(adminRoutes);
+      await apiV1.register(itemRoutes);
+      await apiV1.register(taskRoutes);
+    },
+    { prefix: "/api/v1" }
+  );
 
   return app;
 }

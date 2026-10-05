@@ -18,6 +18,10 @@ export default function AppLayout() {
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="items/[id]" options={{ title: "Détail Item" }} />
+      <Stack.Screen
+        name="task-editor"
+        options={{ title: "Éditeur de tâche", presentation: "modal" }}
+      />
     </Stack>
   );
 }
