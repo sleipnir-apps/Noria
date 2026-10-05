@@ -10,8 +10,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE_NAME: n0md3l4pp-api
-  FRONTEND_IMAGE_NAME: n0md3l4pp-front
+  BACKEND_IMAGE_NAME: noria-api
+  FRONTEND_IMAGE_NAME: noria-front
 
 jobs:
   # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
@@ -126,7 +126,7 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
           build-args: |
-            EXPO_PUBLIC_API_URL=https://n0md3l4pp-api.sleipnir.ovh
+            EXPO_PUBLIC_API_URL=https://noria-api.sleipnir.ovh
 
   deploy:
     needs: [publish-backend, publish-frontend]
@@ -135,8 +135,8 @@ jobs:
     # Pas de garde ici : publish-* sont déjà gated par template-guard,
     # et un job "needs" skippé skippe aussi ses dépendants.
     env:
-      BACKEND_DIR: n0md3l4pp-api
-      FRONTEND_DIR: n0md3l4pp-front
+      BACKEND_DIR: noria-api
+      FRONTEND_DIR: noria-front
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -188,16 +188,16 @@ jobs:
 
       - name: Create secure temporary directory
         run: |
-          mkdir -p /tmp/n0md3l4pp-deploy
-          chmod 700 /tmp/n0md3l4pp-deploy
+          mkdir -p /tmp/noria-deploy
+          chmod 700 /tmp/noria-deploy
 
       - name: Create .env file for backend
         env:
-          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
-          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
-          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+          MONGODB_URI: ${{ env.NORIA_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.NORIA_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.NORIA_JWT_REFRESH_SECRET }}
         run: |
-          cat > /tmp/n0md3l4pp-deploy/.env.server << EOF
+          cat > /tmp/noria-deploy/.env.server << EOF
           NODE_ENV=production
           PORT=3000
           MONGO_URL=${MONGODB_URI}
@@ -205,13 +205,13 @@ jobs:
           JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
           JWT_ACCESS_EXPIRES_IN=15m
           JWT_REFRESH_EXPIRES_IN=7d
-          CORS_ORIGINS=https://n0md3l4pp.sleipnir.ovh
+          CORS_ORIGINS=https://noria.sleipnir.ovh
           EOF
-          chmod 600 /tmp/n0md3l4pp-deploy/.env.server
+          chmod 600 /tmp/noria-deploy/.env.server
 
       - name: Copy env file to server
         run: |
-          scp /tmp/n0md3l4pp-deploy/.env.server ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:projects/${{ env.BACKEND_DIR }}/.env
+          scp /tmp/noria-deploy/.env.server ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:projects/${{ env.BACKEND_DIR }}/.env
 
       - name: Docker login on server
         env:
@@ -226,8 +226,8 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           BACKEND_IMAGE: ${{ env.BACKEND_IMAGE_NAME }}
           BACKEND_DIR: ${{ env.BACKEND_DIR }}
-          PROJECT: n0md3l4pp
-          API_DOMAIN: n0md3l4pp-api.sleipnir.ovh
+          PROJECT: noria
+          API_DOMAIN: noria-api.sleipnir.ovh
         run: |
           ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
             REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
@@ -265,8 +265,8 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE_NAME }}
           FRONTEND_DIR: ${{ env.FRONTEND_DIR }}
-          PROJECT: n0md3l4pp
-          DOMAIN: n0md3l4pp.sleipnir.ovh
+          PROJECT: noria
+          DOMAIN: noria.sleipnir.ovh
         run: |
           ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
             REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
@@ -308,11 +308,11 @@ jobs:
             docker compose ps
           "
 
-      - name: Clean up unused n0md3l4pp images
+      - name: Clean up unused noria images
         run: |
           ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} "
             docker images --format '{{.Repository}}:{{.Tag}}' \
-              | grep -E 'n0md3l4pp-api|n0md3l4pp-front' \
+              | grep -E 'noria-api|noria-front' \
               | grep -v latest \
               | xargs -r docker rmi || true
           "
@@ -321,4 +321,4 @@ jobs:
         if: always()
         run: |
           rm -rf ~/.ssh
-          rm -rf /tmp/n0md3l4pp-deploy
+          rm -rf /tmp/noria-deploy

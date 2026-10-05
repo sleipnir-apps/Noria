@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://staging.api.n0md3l4pp.staging.sleipnir.ovh",
+        "EXPO_PUBLIC_API_URL": "https://staging.api.noria.staging.sleipnir.ovh",
         "APP_VARIANT": "staging"
       }
     },
@@ -20,7 +20,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://pr-0.api.n0md3l4pp.staging.sleipnir.ovh",
+        "EXPO_PUBLIC_API_URL": "https://pr-0.api.noria.staging.sleipnir.ovh",
         "APP_VARIANT": "pr-0"
       }
     },
@@ -30,13 +30,13 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://n0md3l4pp-api.sleipnir.ovh"
+        "EXPO_PUBLIC_API_URL": "https://noria-api.sleipnir.ovh"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://n0md3l4pp-api.sleipnir.ovh"
+        "EXPO_PUBLIC_API_URL": "https://noria-api.sleipnir.ovh"
       }
     }
   },
