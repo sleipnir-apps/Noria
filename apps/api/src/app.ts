@@ -47,9 +47,13 @@ export async function buildApp() {
   await app.register(adminRoutes);
   await app.register(itemRoutes);
 
-  // Mobile app (offline-first): versioned API + sync endpoints, under /api/v1.
+  // Mobile app (offline-first): versioned API. Auth/admin are registered BOTH
+  // at the root (template compatibility) and under /api/v1 (the mobile client
+  // prefixes every call with EXPO_PUBLIC_API_URL=/api/v1).
   await app.register(
     async (apiV1) => {
+      await apiV1.register(authRoutes);
+      await apiV1.register(adminRoutes);
       await apiV1.register(taskRoutes);
       await apiV1.register(syncRoutes);
     },
