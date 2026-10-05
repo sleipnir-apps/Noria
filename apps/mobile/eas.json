@@ -1,0 +1,46 @@
+{
+  "cli": {
+    "version": ">= 24.8.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://staging.api.n0md3l4pp.staging.sleipnir.ovh",
+        "APP_VARIANT": "staging"
+      }
+    },
+    "pr": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://pr-0.api.n0md3l4pp.staging.sleipnir.ovh",
+        "APP_VARIANT": "pr-0"
+      }
+    },
+    "production-apk": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://n0md3l4pp-api.sleipnir.ovh"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://n0md3l4pp-api.sleipnir.ovh"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

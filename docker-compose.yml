@@ -1,0 +1,60 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: template-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: n0md3l4pp-api
+    ports:
+      - "3000:3000"
+    environment:
+      # Stack locale de dev (la prod passe par la CI/CD, pas ce compose) :
+      # NODE_ENV=development active le CORS LAN permissif de apps/api/src/plugins/cors.ts
+      # (accepte http://192.168.x.x:*, pas besoin de lister les IPs ici).
+      - NODE_ENV=development
+      - PORT=3000
+      - HOST=0.0.0.0
+      - MONGO_URL=mongodb://admin:password@mongodb:27017/n0md3l4pp?authSource=admin
+      - JWT_SECRET=dev_access_secret_change_me_32chars
+      - JWT_REFRESH_SECRET=dev_refresh_secret_change_me_32chars
+      - JWT_ACCESS_EXPIRES=15m
+      - JWT_REFRESH_EXPIRES=7d
+      - LOG_LEVEL=debug
+      - CORS_ORIGINS=http://localhost,http://localhost:8080,http://localhost:8081,http://localhost:19006
+    command: sh -c "bun run apps/api/src/migrations/migration-runner.ts && bun run apps/api/src/server.ts"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mobile:
+    build:
+      context: .
+      dockerfile: apps/mobile/Dockerfile
+      args:
+        # URL de l'API vue depuis le navigateur (le web app tourne côté client)
+        EXPO_PUBLIC_API_URL: http://localhost:3000
+    container_name: n0md3l4pp-mobile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:

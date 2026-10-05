@@ -1,0 +1,324 @@
+name: CD - Deploy Docker Images
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: n0md3l4pp-api
+  FRONTEND_IMAGE_NAME: n0md3l4pp-front
+
+jobs:
+  # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
+  # initialisé (scripts/init-app.ts existe encore = rebranding pas
+  # fait, la CI est donc aussi skippée). Le script d'init le supprime
+  # → la garde s'ouvre seule.
+  template-guard:
+    name: Guard — skip if template not initialized
+    runs-on: ubuntu-latest
+    outputs:
+      initialized: ${{ steps.check.outputs.initialized }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check template state
+        id: check
+        run: |
+          if [ -f scripts/init-app.ts ]; then
+            echo "initialized=false" >> "$GITHUB_OUTPUT"
+            echo "🛡️ Template non initialisé — CD ignoré."
+          else
+            echo "initialized=true" >> "$GITHUB_OUTPUT"
+            echo "▶ App initialisée — CD activé."
+          fi
+
+  publish-backend:
+    needs: [template-guard]
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      needs.template-guard.outputs.initialized == 'true'
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+  publish-frontend:
+    needs: [template-guard]
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      needs.template-guard.outputs.initialized == 'true'
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/mobile/Dockerfile
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+          build-args: |
+            EXPO_PUBLIC_API_URL=https://n0md3l4pp-api.sleipnir.ovh
+
+  deploy:
+    needs: [publish-backend, publish-frontend]
+    name: Deploy to Home Server
+    runs-on: ubuntu-latest
+    # Pas de garde ici : publish-* sont déjà gated par template-guard,
+    # et un job "needs" skippé skippe aussi ses dépendants.
+    env:
+      BACKEND_DIR: n0md3l4pp-api
+      FRONTEND_DIR: n0md3l4pp-front
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: prod
+          export-type: env
+
+      - name: Fetch Server Infrastructure Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_SECRET }}
+          project-slug: self-hosted-server-tjnf
+          env-slug: prod
+          export-type: env
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          use-cache: "true"
+          tags: tag:ci
+
+      - name: Wait for Tailscale connection
+        run: |
+          for i in $(seq 1 10); do
+            tailscale status | grep -q "${{ env.SSH_HOST }}" && echo "Tailscale ready" && break
+            echo "Waiting for Tailscale... ($i/10)"
+            sleep 2
+          done
+
+      - name: Install SSH keys
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_ed25519
+          echo "${{ env.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create project directories on server
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "mkdir -p projects/${{ env.BACKEND_DIR }} projects/${{ env.FRONTEND_DIR }}"
+
+      - name: Create secure temporary directory
+        run: |
+          mkdir -p /tmp/n0md3l4pp-deploy
+          chmod 700 /tmp/n0md3l4pp-deploy
+
+      - name: Create .env file for backend
+        env:
+          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+        run: |
+          cat > /tmp/n0md3l4pp-deploy/.env.server << EOF
+          NODE_ENV=production
+          PORT=3000
+          MONGO_URL=${MONGODB_URI}
+          JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+          JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+          JWT_ACCESS_EXPIRES_IN=15m
+          JWT_REFRESH_EXPIRES_IN=7d
+          CORS_ORIGINS=https://n0md3l4pp.sleipnir.ovh
+          EOF
+          chmod 600 /tmp/n0md3l4pp-deploy/.env.server
+
+      - name: Copy env file to server
+        run: |
+          scp /tmp/n0md3l4pp-deploy/.env.server ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:projects/${{ env.BACKEND_DIR }}/.env
+
+      - name: Docker login on server
+        env:
+          GHCR_TOKEN: ${{ env.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "echo '${GHCR_TOKEN}' | docker login ${{ env.REGISTRY }} -u ${{ github.repository_owner }} --password-stdin"
+
+      - name: Generate docker-compose and deploy backend
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE_NAME }}
+          BACKEND_DIR: ${{ env.BACKEND_DIR }}
+          PROJECT: n0md3l4pp
+          API_DOMAIN: n0md3l4pp-api.sleipnir.ovh
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
+            BACKEND_IMAGE="$BACKEND_IMAGE" BACKEND_DIR="$BACKEND_DIR" \
+            PROJECT="$PROJECT" API_DOMAIN="$API_DOMAIN" \
+            bash << 'ENDSSH'
+            printf '%s\n' \
+              "services:" \
+              "  api:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${BACKEND_IMAGE}:latest" \
+              "    restart: unless-stopped" \
+              "    env_file: .env" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api.rule=Host(\`${API_DOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api-http.rule=Host(\`${API_DOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.${PROJECT}-api-http.middlewares=${PROJECT}-api-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.${PROJECT}-api-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.${PROJECT}-api.loadbalancer.server.port=3000\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > projects/${BACKEND_DIR}/docker-compose.yml
+
+            cd projects/${BACKEND_DIR} && docker compose pull && (docker compose up -d || (echo 'Backend deploy failed, rolling back...' && docker compose down && docker compose up -d --no-pull))
+          ENDSSH
+
+      - name: Generate docker-compose and deploy frontend
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE_NAME }}
+          FRONTEND_DIR: ${{ env.FRONTEND_DIR }}
+          PROJECT: n0md3l4pp
+          DOMAIN: n0md3l4pp.sleipnir.ovh
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
+            FRONTEND_IMAGE="$FRONTEND_IMAGE" FRONTEND_DIR="$FRONTEND_DIR" \
+            PROJECT="$PROJECT" DOMAIN="$DOMAIN" \
+            bash << 'ENDSSH'
+            printf '%s\n' \
+              "services:" \
+              "  front:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${FRONTEND_IMAGE}:latest" \
+              "    restart: unless-stopped" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front.rule=Host(\`${DOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front-http.rule=Host(\`${DOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.${PROJECT}-front-http.middlewares=${PROJECT}-front-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.${PROJECT}-front-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.${PROJECT}-front.loadbalancer.server.port=80\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > projects/${FRONTEND_DIR}/docker-compose.yml
+
+            cd projects/${FRONTEND_DIR} && docker compose pull && (docker compose up -d || (echo 'Frontend deploy failed, rolling back...' && docker compose down && docker compose up -d --no-pull))
+          ENDSSH
+
+      - name: Verify deployment health
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} "
+            echo '=== Backend ==='
+            cd projects/${{ env.BACKEND_DIR }}
+            docker compose ps
+            echo '=== Frontend ==='
+            cd ../${{ env.FRONTEND_DIR }}
+            docker compose ps
+          "
+
+      - name: Clean up unused n0md3l4pp images
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} "
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep -E 'n0md3l4pp-api|n0md3l4pp-front' \
+              | grep -v latest \
+              | xargs -r docker rmi || true
+          "
+
+      - name: Clean up sensitive files
+        if: always()
+        run: |
+          rm -rf ~/.ssh
+          rm -rf /tmp/n0md3l4pp-deploy

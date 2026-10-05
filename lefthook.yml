@@ -1,0 +1,19 @@
+pre-commit:
+  parallel: true
+  commands:
+    typecheck:
+      run: bun typecheck
+    lint:
+      run: bun lint
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        msg=$(cat {1})
+        pattern="^(feat|fix|chore|docs|style|refactor|test|ci|build|perf|revert)(\(.+\))?: .+"
+        if ! echo "$msg" | grep -qE "$pattern"; then
+          echo "❌ Commit message must follow Conventional Commits format"
+          echo "   Example: feat(api): add user endpoint"
+          exit 1
+        fi

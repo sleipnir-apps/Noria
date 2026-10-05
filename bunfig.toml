@@ -1,0 +1,6 @@
+# Use the hoisted linker: one copy of each package at the root of node_modules.
+# Bun's default "isolated" linker creates per-dependency-path copies in
+# node_modules/.bun/<pkg>@<ver>+<hash>/, which expo-doctor reports as
+# "duplicate native module dependencies" even when versions are identical.
+[install]
+linker = "hoisted"

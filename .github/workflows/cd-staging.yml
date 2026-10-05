@@ -1,0 +1,858 @@
+name: CD - Deploy Preview (PR) & Staging
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed, labeled, unlabeled]
+    branches:
+      - develop
+  push:
+    branches:
+      - develop
+
+env:
+  REGISTRY: ghcr.io
+  PROJECT_NAME: n0md3l4pp
+  BACKEND_IMAGE_NAME: n0md3l4pp-api
+  FRONTEND_IMAGE_NAME: n0md3l4pp-front
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SUBDOMAIN_SUFFIX: n0md3l4pp.staging.sleipnir.ovh
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  STAGING_SUBDOMAIN: staging.n0md3l4pp.staging.sleipnir.ovh
+
+jobs:
+  # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
+  # initialisé (scripts/init-app.ts existe encore = rebranding pas
+  # fait). Le script d'init le supprime → la garde s'ouvre seule.
+  template-guard:
+    name: Guard — skip if template not initialized
+    runs-on: ubuntu-latest
+    outputs:
+      initialized: ${{ steps.check.outputs.initialized }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check template state
+        id: check
+        run: |
+          if [ -f scripts/init-app.ts ]; then
+            echo "initialized=false" >> "$GITHUB_OUTPUT"
+            echo "🛡️ Template non initialisé — staging ignoré."
+          else
+            echo "initialized=true" >> "$GITHUB_OUTPUT"
+            echo "▶ App initialisée — staging activé."
+          fi
+
+  api-checks:
+    name: API (Backend)
+    needs: [template-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      github.event.action != 'closed' &&
+      !(github.event.action == 'unlabeled' && github.event.label.name == 'preview') &&
+      contains(github.event.pull_request.labels.*.name, 'preview')
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      MONGODB_URI: mongodb://localhost:27017/n0md3l4pp_test
+      JWT_ACCESS_SECRET: test-access-secret-min-32-characters-long-for-security
+      JWT_REFRESH_SECRET: test-refresh-secret-min-32-characters-long-for-security
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_HEAD_SHA }}
+
+      - name: Setup Bun 1.3.6
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: bun run typecheck:api
+
+      - name: Run tests
+        run: bun run test:api
+
+      - name: Lint code
+        run: bun run lint:api
+
+  mobile-checks:
+    name: Mobile (Frontend)
+    needs: [template-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      github.event.action != 'closed' &&
+      !(github.event.action == 'unlabeled' && github.event.label.name == 'preview') &&
+      contains(github.event.pull_request.labels.*.name, 'preview')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_HEAD_SHA }}
+
+      - name: Setup Bun 1.3.6
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint code
+        run: bun run lint:mobile
+
+      - name: TypeScript type check
+        run: bun run typecheck:mobile
+
+  contracts-checks:
+    name: Shared (Contracts)
+    needs: [template-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      github.event.action != 'closed' &&
+      !(github.event.action == 'unlabeled' && github.event.label.name == 'preview') &&
+      contains(github.event.pull_request.labels.*.name, 'preview')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_HEAD_SHA }}
+
+      - name: Setup Bun 1.3.6
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint code
+        run: bun run --cwd packages/contracts lint
+
+      - name: TypeScript type check
+        run: bun run --cwd packages/contracts typecheck
+
+      - name: Run tests
+        run: bun run --cwd packages/contracts test
+
+  # ─── DEPLOY (opened / synchronize / reopened) ───────────────────
+  deploy-preview:
+    needs: [template-guard, api-checks, mobile-checks, contracts-checks]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      (
+        github.event.action != 'labeled' ||
+        github.event.label.name == 'preview'
+      ) &&
+      contains(github.event.pull_request.labels.*.name, 'preview') &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Compute lowercase owner
+        run: echo "REPO_OWNER_LOWERCASE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_HEAD_SHA }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.BACKEND_IMAGE_NAME }}:pr-${{ env.PR_NUMBER }}
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.BACKEND_IMAGE_NAME }}:pr-${{ env.PR_NUMBER }}-${{ env.PR_HEAD_SHA }}
+          cache-from: type=gha,scope=preview-backend
+          cache-to: type=gha,scope=preview-backend,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/mobile/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.FRONTEND_IMAGE_NAME }}:pr-${{ env.PR_NUMBER }}
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.FRONTEND_IMAGE_NAME }}:pr-${{ env.PR_NUMBER }}-${{ env.PR_HEAD_SHA }}
+          cache-from: type=gha,scope=preview-frontend
+          cache-to: type=gha,scope=preview-frontend,mode=max
+          build-args: |
+            EXPO_PUBLIC_API_URL=https://pr-${{ env.PR_NUMBER }}.api.${{ env.SUBDOMAIN_SUFFIX }}
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: staging
+          export-type: env
+
+      - name: Fetch Server Infrastructure Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_SECRET }}
+          project-slug: self-hosted-server-tjnf
+          env-slug: prod
+          export-type: env
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          use-cache: "true"
+          tags: tag:ci
+
+      - name: Wait for Tailscale connection
+        run: |
+          for i in $(seq 1 10); do
+            if ping -c 1 -W 2 "${{ env.SSH_HOST }}" &>/dev/null; then
+              echo "Tailscale ready"
+              exit 0
+            fi
+            echo "Waiting for Tailscale... ($i/10)"
+            sleep 2
+          done
+          echo "Tailscale connection failed"
+          exit 1
+
+      - name: Install SSH keys
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_ed25519
+          echo "${{ env.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create .env for preview backend
+        env:
+          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+        run: |
+          mkdir -p /tmp/preview-deploy
+          chmod 700 /tmp/preview-deploy
+          printf '%s\n' \
+            "NODE_ENV=production" \
+            "PORT=3000" \
+            "MONGO_URL=${MONGODB_URI}" \
+            "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}" \
+            "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
+            "JWT_ACCESS_EXPIRES_IN=15m" \
+            "JWT_REFRESH_EXPIRES_IN=7d" \
+            "CORS_ORIGINS=https://pr-${{ env.PR_NUMBER }}.${{ env.SUBDOMAIN_SUFFIX }}" \
+            > /tmp/preview-deploy/.env
+          chmod 600 /tmp/preview-deploy/.env
+
+      - name: Create preview directories and copy files
+        run: |
+          PR=${{ env.PR_NUMBER }}
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "mkdir -p ~/previews/${{ env.PROJECT_NAME }}/pr-${PR}/backend ~/previews/${{ env.PROJECT_NAME }}/pr-${PR}/frontend"
+          scp /tmp/preview-deploy/.env \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:~/previews/${{ env.PROJECT_NAME }}/pr-${PR}/backend/.env
+
+      - name: Docker login on server
+        env:
+          GHCR_TOKEN: ${{ env.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "echo '${GHCR_TOKEN}' | docker login ${{ env.REGISTRY }} -u ${{ env.REPO_OWNER_LOWERCASE }} --password-stdin"
+
+      - name: Generate docker-compose files and deploy
+        env:
+          PR_DIR: previews/${{ env.PROJECT_NAME }}/pr-${{ env.PR_NUMBER }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REPO_OWNER: ${{ env.REPO_OWNER_LOWERCASE }}
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE_NAME }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE_NAME }}
+          PROJECT: ${{ env.PROJECT_NAME }}
+          SUBDOMAIN: ${{ env.SUBDOMAIN_SUFFIX }}
+          PR: ${{ env.PR_NUMBER }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            PR_DIR="$PR_DIR" REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
+            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+            PROJECT="$PROJECT" SUBDOMAIN="$SUBDOMAIN" PR="$PR" \
+            bash << 'ENDSSH'
+            printf '%s\n' \
+              "services:" \
+              "  api:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${BACKEND_IMAGE}:pr-${PR}" \
+              "    restart: unless-stopped" \
+              "    env_file: /home/${{ env.SSH_USER }}/previews/${PROJECT}/pr-${PR}/backend/.env" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}.rule=Host(\`pr-${PR}.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}-http.rule=Host(\`pr-${PR}.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.pr-${PR}-api-${PROJECT}-http.middlewares=pr-${PR}-api-${PROJECT}-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.pr-${PR}-api-${PROJECT}-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.pr-${PR}-api-${PROJECT}.loadbalancer.server.port=3000\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > ~/${PR_DIR}/backend/docker-compose.yml
+
+            printf '%s\n' \
+              "services:" \
+              "  front:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${FRONTEND_IMAGE}:pr-${PR}" \
+              "    restart: unless-stopped" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}.rule=Host(\`pr-${PR}.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}-http.rule=Host(\`pr-${PR}.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.pr-${PR}-front-${PROJECT}-http.middlewares=pr-${PR}-front-${PROJECT}-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.pr-${PR}-front-${PROJECT}-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.pr-${PR}-front-${PROJECT}.loadbalancer.server.port=80\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > ~/${PR_DIR}/frontend/docker-compose.yml
+
+            cd ~/${PR_DIR}/backend && docker compose -p "${PROJECT}-pr-${PR}-backend" pull && docker compose -p "${PROJECT}-pr-${PR}-backend" up -d
+            cd ~/${PR_DIR}/frontend && docker compose -p "${PROJECT}-pr-${PR}-frontend" pull && docker compose -p "${PROJECT}-pr-${PR}-frontend" up -d
+          ENDSSH
+
+      - name: Health check
+        run: |
+          PR=${{ env.PR_NUMBER }}
+          FRONTEND_URL="https://pr-${PR}.${{ env.SUBDOMAIN_SUFFIX }}"
+          BACKEND_URL="https://pr-${PR}.api.${{ env.SUBDOMAIN_SUFFIX }}"
+
+          check_url() {
+            local url=$1
+            local max_attempts=15
+            local wait=10
+            for i in $(seq 1 $max_attempts); do
+              status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" || echo "000")
+              if [ "$status" -ge 200 ] && [ "$status" -lt 400 ]; then
+                echo "✓ $url responded with $status"
+                return 0
+              fi
+              echo "Attempt $i/$max_attempts — $url returned $status, retrying in ${wait}s..."
+              sleep $wait
+            done
+            echo "✗ $url did not respond after $max_attempts attempts"
+            return 1
+          }
+
+          check_url "$BACKEND_URL/health"
+          check_url "$FRONTEND_URL"
+
+      - name: Comment preview URL on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const body = `## 🚀 Preview déployée\n\n| | URL |\n|---|---|\n| **Frontend** | https://pr-${pr}.${{ env.SUBDOMAIN_SUFFIX }} |\n| **API** | https://pr-${pr}.api.${{ env.SUBDOMAIN_SUFFIX }} |`;
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr
+            });
+            const existing = comments.data.find(c => c.body.includes('Preview déployée'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                body
+              });
+            }
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -rf ~/.ssh /tmp/preview-deploy
+
+  # ─── CLEANUP (PR fermée / mergée) ───────────────────────────────
+  cleanup-preview:
+    needs: [template-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      contains(github.event.pull_request.labels.*.name, 'preview') &&
+      (
+        github.event.action == 'closed' ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'preview')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    concurrency:
+      group: preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+
+    env:
+      REGISTRY: ghcr.io
+      PROJECT_NAME: n0md3l4pp
+      BACKEND_IMAGE_NAME: n0md3l4pp-api
+      FRONTEND_IMAGE_NAME: n0md3l4pp-front
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SUBDOMAIN_SUFFIX: n0md3l4pp.staging.sleipnir.ovh
+
+    steps:
+      - name: Compute lowercase owner
+        run: echo "REPO_OWNER_LOWERCASE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Fetch Server Infrastructure Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_SECRET }}
+          project-slug: self-hosted-server-tjnf
+          env-slug: prod
+          export-type: env
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          use-cache: "true"
+          tags: tag:ci
+
+      - name: Wait for Tailscale connection
+        run: |
+          for i in $(seq 1 10); do
+            if ping -c 1 -W 2 "${{ env.SSH_HOST }}" &>/dev/null; then
+              echo "Tailscale ready"
+              exit 0
+            fi
+            echo "Waiting for Tailscale... ($i/10)"
+            sleep 2
+          done
+          echo "Tailscale connection failed"
+          exit 1
+
+      - name: Install SSH keys
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_ed25519
+          echo "${{ env.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Destroy preview environment
+        env:
+          PR: ${{ env.PR_NUMBER }}
+          PROJECT: ${{ env.PROJECT_NAME }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            PR="$PR" PROJECT="$PROJECT" \
+            bash << 'ENDSSH'
+            echo "=== Cleaning up staging resources for PR #${PR} ==="
+
+            if [ -d ~/previews/${PROJECT}/pr-${PR}/backend ]; then
+              echo "Stopping backend containers..."
+              cd ~/previews/${PROJECT}/pr-${PR}/backend && docker compose down --rmi all --remove-orphans 2>/dev/null || true
+            fi
+            if [ -d ~/previews/${PROJECT}/pr-${PR}/frontend ]; then
+              echo "Stopping frontend containers..."
+              cd ~/previews/${PROJECT}/pr-${PR}/frontend && docker compose down --rmi all --remove-orphans 2>/dev/null || true
+            fi
+
+            echo "Removing preview directories..."
+            rm -rf ~/previews/${PROJECT}/pr-${PR}
+
+            echo "Cleaning up Docker images..."
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep ":pr-${PR}" \
+              | xargs -r docker rmi -f 2>/dev/null || true
+
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep "pr-${PR}-" \
+              | xargs -r docker rmi -f 2>/dev/null || true
+
+            docker image prune -f 2>/dev/null || true
+
+            echo "=== Server cleanup completed for PR #${PR} ==="
+          ENDSSH
+
+      - name: Cleanup GHCR Images
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ env.PR_NUMBER }}';
+            const owner = '${{ env.REPO_OWNER_LOWERCASE }}';
+            const backendImage = '${{ env.BACKEND_IMAGE_NAME }}';
+            const frontendImage = '${{ env.FRONTEND_IMAGE_NAME }}';
+            const repo = '${{ github.repository }}'.split('/');
+            const repoOwner = repo[0];
+
+            async function deletePackage(packageName, tag) {
+              try {
+                const packages = await github.rest.packages.getAllPackageVersionsForPackageOwnedByUser({
+                  package_type: 'container',
+                  package_name: packageName,
+                  username: owner,
+                });
+
+                const versionToDelete = packages.data.find(pkg =>
+                  pkg.metadata.container.tags.includes(tag)
+                );
+
+                if (versionToDelete) {
+                  await github.rest.packages.deletePackageVersionForUser({
+                    package_type: 'container',
+                    package_name: packageName,
+                    package_version_id: versionToDelete.id,
+                    username: owner,
+                  });
+                  console.log(`✓ Deleted ${packageName}:${tag}`);
+                } else {
+                  console.log(`⚠ Package ${packageName}:${tag} not found or already deleted`);
+                }
+              } catch (error) {
+                console.log(`⚠ Could not delete ${packageName}:${tag}: ${error.message}`);
+              }
+            }
+
+            await deletePackage(backendImage, `pr-${prNumber}`);
+            await deletePackage(frontendImage, `pr-${prNumber}`);
+
+            try {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: repoOwner,
+                repo: repo[1],
+                pull_number: parseInt(prNumber),
+              });
+
+              if (pr && pr.head && pr.head.sha) {
+                const sha = pr.head.sha.substring(0, 7);
+                await deletePackage(backendImage, `pr-${prNumber}-${sha}`);
+                await deletePackage(frontendImage, `pr-${prNumber}-${sha}`);
+              }
+            } catch (error) {
+              console.log(`⚠ Could not get PR SHA: ${error.message}`);
+            }
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -rf ~/.ssh
+
+      - name: Notify cleanup completion
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ env.PR_NUMBER }}';
+            const subdomain = '${{ env.SUBDOMAIN_SUFFIX }}';
+            const body = `## 🧹 Staging Cleanup Completed\n\nAll staging resources for this PR have been cleaned up:\n- ✅ Containers stopped and removed\n- ✅ Docker images removed\n- ✅ Preview directories deleted\n- ✅ GHCR images removed\n\nURLs that are no longer available:\n- ~~https://pr-${prNumber}.${subdomain}~~\n- ~~https://pr-${prNumber}.api.${subdomain}~~`;
+
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt(prNumber),
+              body: body
+            });
+
+  # ─── STAGING PERSISTANT (push sur develop) ──────────────────────
+  staging-checks:
+    name: Staging Checks (API/Mobile/Contracts)
+    needs: [template-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      MONGODB_URI: mongodb://localhost:27017/n0md3l4pp_test
+      JWT_ACCESS_SECRET: test-access-secret-min-32-characters-long-for-security
+      JWT_REFRESH_SECRET: test-refresh-secret-min-32-characters-long-for-security
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun 1.3.6
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.6
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Lint code
+        run: bun run lint
+
+  deploy-staging:
+    name: Deploy Persistent Staging
+    needs: [staging-checks]
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    concurrency:
+      group: staging-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Compute lowercase owner
+        run: echo "REPO_OWNER_LOWERCASE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend (staging)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.BACKEND_IMAGE_NAME }}:staging
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.BACKEND_IMAGE_NAME }}:staging-${{ env.PR_HEAD_SHA }}
+          cache-from: type=gha,scope=staging-backend
+          cache-to: type=gha,scope=staging-backend,mode=max
+
+      - name: Build and push frontend (staging)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/mobile/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.FRONTEND_IMAGE_NAME }}:staging
+            ${{ env.REGISTRY }}/${{ env.REPO_OWNER_LOWERCASE }}/${{ env.FRONTEND_IMAGE_NAME }}:staging-${{ env.PR_HEAD_SHA }}
+          cache-from: type=gha,scope=staging-frontend
+          cache-to: type=gha,scope=staging-frontend,mode=max
+          build-args: |
+            EXPO_PUBLIC_API_URL=https://staging.api.${{ env.SUBDOMAIN_SUFFIX }}
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: staging
+          export-type: env
+
+      - name: Fetch Server Infrastructure Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_SECRET }}
+          project-slug: self-hosted-server-tjnf
+          env-slug: prod
+          export-type: env
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          use-cache: "true"
+          tags: tag:ci
+
+      - name: Wait for Tailscale connection
+        run: |
+          for i in $(seq 1 10); do
+            if ping -c 1 -W 2 "${{ env.SSH_HOST }}" &>/dev/null; then
+              echo "Tailscale ready"
+              exit 0
+            fi
+            echo "Waiting for Tailscale... ($i/10)"
+            sleep 2
+          done
+          echo "Tailscale connection failed"
+          exit 1
+
+      - name: Install SSH keys
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_ed25519
+          echo "${{ env.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create .env for staging backend
+        env:
+          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+        run: |
+          mkdir -p /tmp/staging-deploy
+          chmod 700 /tmp/staging-deploy
+          printf '%s\n' \
+            "NODE_ENV=production" \
+            "PORT=3000" \
+            "MONGO_URL=${MONGODB_URI}" \
+            "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}" \
+            "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
+            "JWT_ACCESS_EXPIRES_IN=15m" \
+            "JWT_REFRESH_EXPIRES_IN=7d" \
+            "CORS_ORIGINS=https://${{ env.STAGING_SUBDOMAIN }}" \
+            > /tmp/staging-deploy/.env
+          chmod 600 /tmp/staging-deploy/.env
+
+      - name: Create staging directories and copy files
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "mkdir -p ~/staging/${{ env.PROJECT_NAME }}/backend ~/staging/${{ env.PROJECT_NAME }}/frontend"
+          scp /tmp/staging-deploy/.env \
+            ${{ env.SSH_USER }}@${{ env.SSH_HOST }}:~/staging/${{ env.PROJECT_NAME }}/backend/.env
+
+      - name: Docker login on server
+        env:
+          GHCR_TOKEN: ${{ env.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            "echo '${GHCR_TOKEN}' | docker login ${{ env.REGISTRY }} -u ${{ env.REPO_OWNER_LOWERCASE }} --password-stdin"
+
+      - name: Generate docker-compose files and deploy staging
+        env:
+          STAGING_DIR: staging/${{ env.PROJECT_NAME }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REPO_OWNER: ${{ env.REPO_OWNER_LOWERCASE }}
+          BACKEND_IMAGE: ${{ env.BACKEND_IMAGE_NAME }}
+          FRONTEND_IMAGE: ${{ env.FRONTEND_IMAGE_NAME }}
+          PROJECT: ${{ env.PROJECT_NAME }}
+          SUBDOMAIN: ${{ env.SUBDOMAIN_SUFFIX }}
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ env.SSH_HOST }} \
+            STAGING_DIR="$STAGING_DIR" REGISTRY="$REGISTRY" REPO_OWNER="$REPO_OWNER" \
+            BACKEND_IMAGE="$BACKEND_IMAGE" FRONTEND_IMAGE="$FRONTEND_IMAGE" \
+            PROJECT="$PROJECT" SUBDOMAIN="$SUBDOMAIN" \
+            bash << 'ENDSSH'
+            printf '%s\n' \
+              "services:" \
+              "  api:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${BACKEND_IMAGE}:staging" \
+              "    restart: unless-stopped" \
+              "    env_file: ~/${STAGING_DIR}/backend/.env" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api.rule=Host(\`staging.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api-http.rule=Host(\`staging.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api-http.middlewares=${PROJECT}-staging-api-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.${PROJECT}-staging-api-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.${PROJECT}-staging-api.loadbalancer.server.port=3000\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > ~/${STAGING_DIR}/backend/docker-compose.yml
+
+            printf '%s\n' \
+              "services:" \
+              "  front:" \
+              "    image: ${REGISTRY}/${REPO_OWNER}/${FRONTEND_IMAGE}:staging" \
+              "    restart: unless-stopped" \
+              "    labels:" \
+              "      - \"traefik.enable=true\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front.rule=Host(\`staging.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front.entrypoints=websecure\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front.tls.certresolver=letsencrypt\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front-http.rule=Host(\`staging.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front-http.entrypoints=web\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front-http.middlewares=${PROJECT}-staging-front-redirect-to-https\"" \
+              "      - \"traefik.http.middlewares.${PROJECT}-staging-front-redirect-to-https.redirectscheme.scheme=https\"" \
+              "      - \"traefik.http.services.${PROJECT}-staging-front.loadbalancer.server.port=80\"" \
+              "networks:" \
+              "  default:" \
+              "    external: true" \
+              "    name: traefik_default" \
+              > ~/${STAGING_DIR}/frontend/docker-compose.yml
+
+            cd ~/${STAGING_DIR}/backend && docker compose -p "${PROJECT}-staging-backend" pull && docker compose -p "${PROJECT}-staging-backend" up -d
+            cd ~/${STAGING_DIR}/frontend && docker compose -p "${PROJECT}-staging-frontend" pull && docker compose -p "${PROJECT}-staging-frontend" up -d
+          ENDSSH
+
+      - name: Health check
+        run: |
+          FRONTEND_URL="https://${{ env.STAGING_SUBDOMAIN }}"
+          BACKEND_URL="https://staging.api.${{ env.SUBDOMAIN_SUFFIX }}"
+
+          check_url() {
+            local url=$1
+            local max_attempts=15
+            local wait=10
+            for i in $(seq 1 $max_attempts); do
+              status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" || echo "000")
+              if [ "$status" -ge 200 ] && [ "$status" -lt 400 ]; then
+                echo "✓ $url responded with $status"
+                return 0
+              fi
+              echo "Attempt $i/$max_attempts — $url returned $status, retrying in ${wait}s..."
+              sleep $wait
+            done
+            echo "✗ $url did not respond after $max_attempts attempts"
+            return 1
+          }
+
+          check_url "$BACKEND_URL/health"
+          check_url "$FRONTEND_URL"
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -rf ~/.ssh /tmp/staging-deploy

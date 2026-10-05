@@ -1,0 +1,254 @@
+name: Init Repo
+
+# Auto-initialisation d'un repo créé depuis le template :
+#   1. Rebrand le template avec le nom du repo (ou l'input du bouton)
+#   2. Crée le projet + cluster MongoDB Atlas (Paris, M0) et un user DB
+#   3. Génère les secrets JWT (staging + prod)
+#   4. Pousse les secrets dans Infisical (projet apps, env staging + prod)
+#   5. Crée la branche develop + une branche d'init, ouvre une PR
+#
+# Garde-fous :
+#   - Jamais exécuté sur le repo template lui-même (comparaison du nom
+#     de repo avec TEMPLATE_REPO_NAME ci-dessous).
+#   - Sur un push : uniquement si scripts/init-app.ts existe encore (le
+#     script se supprime lui-même après le rebranding → no-op ensuite).
+#   - workflow_dispatch : permet de relancer avec un nom spécifique
+#     (Atlas/Infisical/branches sont idempotents, pas de doublons).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      app-name:
+        description: "Nom de l'app (par défaut : nom du repo)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: init-repo
+  cancel-in-progress: true
+
+jobs:
+  init:
+    name: Rebrand + Atlas + Infisical + PR
+    runs-on: ubuntu-latest
+
+    steps:
+      # ─── Garde-fou SANS checkout ─────────────────────────────────────
+      # Ce check n'utilise que des variables de contexte (nom du repo,
+      # type d'événement) : il doit passer AVANT le checkout pour que
+      # le repo template ne dépense même pas une étape de checkout —
+      # et surtout pour que le crash "token required" de checkout ne
+      # se produise jamais sur le template (le secret
+      # WORKFLOW_PUSH_TOKEN n'y est pas accessible : repo privé sans
+      # accès aux Organization Secrets du plan Free).
+      - name: Check if init should run
+        id: check
+        env:
+          # Ce workflow ne doit jamais tourner sur le repo template
+          # lui-même. À ajuster si le repo template est renommé.
+          TEMPLATE_REPO_NAME: bun-expo-fastify-mongo-template
+        run: |
+          IS_TEMPLATE=false
+          if [ "${GITHUB_REPOSITORY#*/}" = "$TEMPLATE_REPO_NAME" ]; then
+            IS_TEMPLATE=true
+          fi
+
+          RUN=false
+          if [ "$IS_TEMPLATE" = false ]; then
+            # workflow_dispatch (relance manuelle assumée) ou push sur
+            # un repo non-template : on continue. La détection fine
+            # (scripts/init-app.ts présent ?) se fait APRÈS le checkout,
+            # étape "Check template state" ci-dessous.
+            RUN=true
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
+          if [ "$IS_TEMPLATE" = true ]; then
+            echo "🛡️ Repo template détecté — init ignoré."
+          else
+            echo "▶ Repo non-template — initialisation possible."
+          fi
+
+      - name: Checkout code
+        if: steps.check.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
+
+      # Vrai check template APRÈS checkout : init-app.ts se supprime
+      # lui-même après le rebranding, donc sa présence = pas encore
+      # initialisé. Sur un push, c'est ce qui évite de re-init un repo
+      # déjà rebrandé.
+      - name: Check template state
+        id: state
+        if: steps.check.outputs.run == 'true'
+        run: |
+          NEEDED=false
+          [ -f scripts/init-app.ts ] && NEEDED=true
+
+          RUN=false
+          if [ "$NEEDED" = true ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            RUN=true
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
+          if [ "$RUN" = false ]; then
+            echo "🛡️ Template déjà initialisé — rien à faire."
+          else
+            echo "▶ Initialisation du repo…"
+          fi
+
+      - name: Resolve app name
+        id: name
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        env:
+          INPUT_NAME: ${{ github.event.inputs.app-name }}
+        run: |
+          if [ -n "$INPUT_NAME" ]; then
+            echo "name=$INPUT_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Bun
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Run init-app rebranding
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        env:
+          APP_NAME: ${{ steps.name.outputs.name }}
+        run: |
+          # Tolerant : en relance manuelle après merge, le script n'existe
+          # plus (rebranding déjà fait) — on continue pour les étapes
+          # Atlas/Infisical/PR qui sont idempotentes.
+          if [ -f scripts/init-app.ts ]; then
+            # init-app.ts supprime scripts/init-app.ts, .github/scripts/
+            # et init-repo.yml (cleanup de fin d'init), mais les étapes
+            # Atlas/Infisical ci-dessous utilisent encore ces scripts :
+            # on les copie HORS du repo (/tmp) pour que le commit de la
+            # PR ne les contienne pas.
+            cp .github/scripts/atlas-init.sh .github/scripts/infisical-push.sh /tmp/
+            bun scripts/init-app.ts "$APP_NAME"
+          else
+            echo "scripts/init-app.ts absent — rebranding déjà fait, on passe."
+          fi
+
+      - name: Fetch Server Infrastructure Secrets (Atlas API keys)
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_SELF_HOSTED_SERVER_CLIENT_SECRET }}
+          project-slug: self-hosted-server-tjnf
+          env-slug: prod
+          export-type: env
+
+      - name: Create Atlas project + cluster (Paris) + DB user
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        id: atlas
+        # NB : les secrets Infisical (ATLAS_*, injectés par l'action via
+        # export-type: env) ne sont PAS lisibles via ${{ env.* }} dans ce
+        # bloc env: — le contexte env: du YAML ne voit que les variables
+        # déclarées dans le workflow. Le script atlas-init.sh les lit
+        # directement depuis l'environnement du shell.
+        env:
+          APP_NAME: ${{ steps.name.outputs.name }}
+          SLEIPNIR_SERVER_IP: ${{ secrets.SLEIPNIR_SERVER_IP }}
+        run: |
+          # Même slugify que init-app.ts : minuscules, accents retirés,
+          # séparateurs → tirets. Les "_" ne deviennent des espaces QUE
+          # pour le display (géré dans init-app.ts), pas pour le slug.
+          SLUG=$(python3 -c "
+          import unicodedata, sys, re
+          s = sys.argv[1].lower()
+          s = unicodedata.normalize('NFD', s)
+          s = ''.join(c for c in s if not unicodedata.combining(c))
+          s = re.sub(r'[^a-z0-9]+', '-', s).strip('-')
+          print(s)
+          " "$APP_NAME")
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          # Seules les 2 lignes MONGODB_URI_* vont dans GITHUB_ENV (le
+          # script logge le reste sur stderr). Les scripts vivent dans
+          # /tmp (copiés avant le rebranding, qui les supprime du repo).
+          bash /tmp/atlas-init.sh "$SLUG" >> "$GITHUB_ENV"
+
+      - name: Generate JWT secrets + push all app secrets to Infisical
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        env:
+          SLUG: ${{ steps.atlas.outputs.slug }}
+          # MONGODB_URI_* viennent du step atlas (via GITHUB_ENV, donc
+          # présents dans l'environnement de ce step — pas besoin de
+          # les re-mapper). Les INFISICAL_APPS_* sont des secrets d'org.
+          INFISICAL_APPS_CLIENT_ID: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          INFISICAL_APPS_CLIENT_SECRET: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+        run: bash /tmp/infisical-push.sh "$SLUG"
+
+      - name: Create branches, PR, and merge init to develop then main
+        if: steps.check.outputs.run == 'true' && steps.state.outputs.run == 'true'
+        env:
+          APP_NAME: ${{ steps.name.outputs.name }}
+          GH_TOKEN: ${{ secrets.WORKFLOW_PUSH_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # develop = copie de main (no-op silencieux si elle existe déjà)
+          git push origin origin/main:refs/heads/develop 2>/dev/null || true
+
+          # Branche d'init avec le rebranding (force-push = relançable)
+          git checkout -b init/initialization-all-repo
+          git add -A
+          git commit -m "chore: initialize app as ${APP_NAME}" || echo "Rien à committer (déjà rebrandé)"
+          git push origin init/initialization-all-repo --force
+
+          # PR d'init vers develop (traçabilité visible dans l'historique)
+          gh pr create \
+            --base develop \
+            --head init/initialization-all-repo \
+            --title "chore: initialisation ${APP_NAME}" \
+            --body "Initialisation automatique du template :
+
+          - Rebranding complet avec le nom **${APP_NAME}**
+          - Projet + cluster MongoDB Atlas (Paris) créé, user DB créé
+          - Secrets MONGODB_URI (prod + staging) poussés dans Infisical
+          - Secrets JWT générés et poussés dans Infisical (staging + prod)
+          - Branches develop + main synchronisées
+
+          Cette PR est mergée automatiquement (l'init est idempotent et
+          relançable via Run workflow). Ensuite à faire à la main : voir
+          le README (section ⚠️ mobile / EAS + sondes Uptime Kuma)." \
+            || echo "PR existe déjà ou rien à merger"
+
+          # Merge auto : develop ← init. --merge garde le commit d'init
+          # visible dans l'historique, --delete-branch nettoie la
+          # branche d'init, --admin bypass les protections éventuelles
+          # (repo neuf, aucune règle à respecter).
+          PR_URL=$(gh pr list --head init/initialization-all-repo --state open --json url --jq '.[0].url')
+          if [ -n "$PR_URL" ]; then
+            gh pr merge "${PR_URL##*/}" --merge --delete-branch --admin \
+              && echo "✓ PR d'init mergée dans develop" \
+              || echo "Merge de la PR d'init impossible (peut-être déjà mergée)"
+          else
+            echo "Aucune PR ouverte — déjà mergée ?"
+          fi
+
+          # main ← develop : le rebranding atteint aussi la branche prod.
+          git fetch origin develop main
+          git checkout main
+          git reset --hard origin/main
+          if git merge --ff-only origin/develop 2>/dev/null; then
+            git push origin main
+            echo "✓ main synchronisée avec develop (fast-forward)"
+          else
+            git merge origin/develop -m "chore: sync main with develop after init"
+            git push origin main
+            echo "✓ main synchronisée avec develop (merge commit)"
+          fi

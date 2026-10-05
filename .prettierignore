@@ -1,0 +1,14 @@
+# Generated / vendored files
+node_modules
+bun.lock
+**/.expo/**
+**/expo-env.d.ts
+**/dist/**
+
+# Workflows are written by hand, keep GitHub's YAML style
+.github/workflows/**
+
+# Not worth formatting
+**/*.md
+**/tsconfig.json
+**/icon.json

@@ -1,0 +1,30 @@
+# Version control
+.git
+.github
+
+# Dependencies (rebuilt inside the image)
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+out
+
+# Expo local state
+**/.expo
+**/expo-env.d.ts
+
+# Environment files (secrets are injected at runtime / build args)
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Dev tooling
+.claude
+.idea
+.vscode
+*.log
+*.tsbuildinfo
+.eslintcache

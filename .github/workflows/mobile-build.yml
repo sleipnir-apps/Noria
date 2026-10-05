@@ -1,0 +1,301 @@
+name: Mobile - EAS Build (Android)
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [develop]
+
+env:
+  EAS_PROJECT_DIR: apps/mobile
+
+jobs:
+  # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
+  # initialisé (scripts/init-app.ts existe encore = rebranding pas
+  # fait). Le script d'init le supprime → la garde s'ouvre seule.
+  template-guard:
+    name: Guard — skip if template not initialized
+    runs-on: ubuntu-latest
+    outputs:
+      initialized: ${{ steps.check.outputs.initialized }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check template state
+        id: check
+        run: |
+          if [ -f scripts/init-app.ts ]; then
+            echo "initialized=false" >> "$GITHUB_OUTPUT"
+            echo "🛡️ Template non initialisé — builds mobiles ignorés."
+          else
+            echo "initialized=true" >> "$GITHUB_OUTPUT"
+            echo "▶ App initialisée — builds mobiles activés."
+          fi
+
+  # ─── Garde-fou Expo : sans token EXPO dans Infisical, pas de build ─
+  # mobile possible. On sort en "skipped" (pas en fail) pour ne pas
+  # polluer l'onglet Actions : la section ⚠️ du README explique comment
+  # l'ajouter quand on veut l'app sur mobile.
+  # ─── Garde-fou Expo : sans token ni projectId EAS, pas de build ────
+  # mobile possible. On sort en "skipped" (pas en fail) pour ne pas
+  # polluer l'onglet Actions : la section ⚠️ du README explique comment
+  # activer l'app mobile.
+  expo-guard:
+    name: Guard — skip if no Expo token or project
+    needs: [template-guard]
+    if: needs.template-guard.outputs.initialized == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      # Checkout nécessaire pour lire app.config.ts (projectId EAS).
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: prod
+          export-type: env
+
+      - name: Check Expo token + project
+        id: check
+        env:
+          EXPO_TOKEN: ${{ env.EXPO_TOKEN }}
+        run: |
+          EAS_PROJECT_ID=$(sed -n 's/.*projectId: "\([^"]*\)".*/\1/p' apps/mobile/app.config.ts | head -1)
+
+          if [ -z "$EXPO_TOKEN" ] && [ -z "$EAS_PROJECT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "📱 Ni token Expo (EXPO_TOKEN absent d'Infisical) ni projectId EAS (extra.eas.projectId vide dans app.config.ts) — build mobile ignoré."
+            echo "   Pour activer les builds mobiles : voir README, section ⚠️ EAS builds."
+          elif [ -z "$EXPO_TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "📱 Projet EAS rattaché mais pas de token (EXPO_TOKEN absent d'Infisical) — build mobile ignoré."
+            echo "   Crée un access token sur expo.dev et range-le dans Infisical : EXPO_TOKEN."
+          elif [ -z "$EAS_PROJECT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "📱 Token Expo présent mais projectId EAS vide (extra.eas.projectId dans apps/mobile/app.config.ts) — build mobile ignoré."
+            echo "   Crée le projet sur expo.dev et colle l'ID dans app.config.ts : voir README, section ⚠️ EAS builds."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "▶ Token Expo + projectId EAS ($EAS_PROJECT_ID) présents — builds mobiles activés."
+          fi
+
+  # ─── Push sur develop → APK "n0md3l4pP staging" ───────────────────
+  build-preview:
+    name: Build APK (staging variant)
+    needs: [template-guard, expo-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      needs.expo-guard.outputs.ready == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: prod
+          export-type: env
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ env.EXPO_TOKEN }}
+
+      - name: Submit EAS build (preview)
+        working-directory: ${{ env.EAS_PROJECT_DIR }}
+        run: eas build --platform android --profile preview --non-interactive --no-wait
+
+  # ─── Push sur main → APK prod installable à côté du staging ───────
+  # Tant que le projet n'est pas publié sur les stores, on distribue un
+  # APK "production-apk" (nom standard, package com.sleipnir.n0md3l4pppascal)
+  # qui coexiste sur le téléphone avec l'APK staging (package .staging).
+  build-production-apk:
+    name: Build APK (prod variant)
+    needs: [template-guard, expo-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      needs.expo-guard.outputs.ready == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: prod
+          export-type: env
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ env.EXPO_TOKEN }}
+
+      - name: Submit EAS build (production-apk)
+        working-directory: ${{ env.EAS_PROJECT_DIR }}
+        run: eas build --platform android --profile production-apk --non-interactive --no-wait
+
+  # ─── PR avec label "mobile" → APK "n0md3l4pP pr-N" ────────────────
+  # Chaque PR labellisée "mobile" produit un APK séparément installable
+  # (package com.sleipnir.n0md3l4pppascal.prN) qui pointe vers la preview back
+  # de la PR (https://pr-N.api.n0md3l4pp.staging.sleipnir.ovh).
+  build-pr:
+    name: Build APK (PR ${{ github.event.pull_request.number }})
+    needs: [template-guard, expo-guard]
+    if: >
+      needs.template-guard.outputs.initialized == 'true' &&
+      needs.expo-guard.outputs.ready == 'true' &&
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'mobile') &&
+      github.event.action != 'closed' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'mobile')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    concurrency:
+      group: mobile-build-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch APPS Secrets
+        uses: Infisical/secrets-action@v1.0.9
+        with:
+          client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+          project-slug: apps-x-tl-w
+          env-slug: prod
+          export-type: env
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ env.EXPO_TOKEN }}
+
+      - name: Configure EAS PR build
+        working-directory: ${{ env.EAS_PROJECT_DIR }}
+        env:
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+        run: |
+          bun -e '
+            const file = "eas.json";
+            const config = await Bun.file(file).json();
+
+            config.build.pr.env = {
+              ...(config.build.pr.env ?? {}),
+              APP_VARIANT: `pr-${process.env.PR_NUMBER}`,
+              EXPO_PUBLIC_API_URL: `https://pr-${process.env.PR_NUMBER}.api.n0md3l4pp.staging.sleipnir.ovh`,
+            };
+
+            await Bun.write(file, `${JSON.stringify(config, null, 2)}\n`);
+          '
+
+      - name: Submit EAS build (pr)
+        working-directory: ${{ env.EAS_PROJECT_DIR }}
+        run: eas build --platform android --profile pr --non-interactive --no-wait
+
+      - name: Comment build info on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const body = `## 📱 Build APK (PR) soumis\n\nUn build EAS Android a été soumis pour cette PR :\n- **App** : n0md3l4pP pr-${pr} (installable à côté des autres variantes)\n- **API** : https://pr-${pr}.api.n0md3l4pp.staging.sleipnir.ovh\n\nLe lien de téléchargement de l'APK sera disponible sur [expo.dev](https://expo.dev) → Builds quand il sera terminé.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+              body,
+            });
+
+  # ─── Push sur main → build AAB production (Play Store) ────────────
+  # Nécessite un compte Google Play Developer (25 $ unique) pour la
+  # soumission store. Pour activer :
+  #   1. Acheter le compte Google Play Developer et créer l'app dans
+  #      la Play Console (package: com.sleipnir.n0md3l4pppascal).
+  #   2. Décommenter le job ci-dessous.
+  #   3. Configurer `eas submit -p android --latest` avec les credentials
+  #      (service account JSON dans Infisical).
+  #
+  # build-production:
+  #   name: Build AAB (production - Play Store)
+  #   needs: [template-guard, expo-guard]
+  #   if: >
+  #     needs.template-guard.outputs.initialized == 'true' &&
+  #     needs.expo-guard.outputs.ready == 'true' &&
+  #     github.event_name == 'push' &&
+  #     github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Fetch APPS Secrets
+  #       uses: Infisical/secrets-action@v1.0.9
+  #       with:
+  #         client-id: ${{ secrets.INFISICAL_APPS_CLIENT_ID }}
+  #         client-secret: ${{ secrets.INFISICAL_APPS_CLIENT_SECRET }}
+  #         project-slug: apps-x-tl-w
+  #         env-slug: prod
+  #         export-type: env
+  #
+  #     - name: Setup Bun
+  #       uses: oven-sh/setup-bun@v2
+  #
+  #     - name: Install dependencies
+  #       run: bun install --frozen-lockfile
+  #
+  #     - name: Setup EAS CLI
+  #       uses: expo/expo-github-action@v8
+  #       with:
+  #         eas-version: latest
+  #         token: ${{ env.EXPO_TOKEN }}
+  #
+  #     - name: Submit EAS build (production)
+  #       working-directory: ${{ env.EAS_PROJECT_DIR }}
+  #       run: eas build --platform android --profile production --non-interactive --no-wait
+#
