@@ -4,17 +4,17 @@
 // PR preview).
 //
 // APP_VARIANT is set per EAS build profile (see apps/mobile/eas.json):
-//   - unset            -> "n0md3l4pP"                / com.sleipnir.n0md3l4pppascal
-//   - "staging"        -> "n0md3l4pP staging"        / com.sleipnir.n0md3l4pppascal.staging
-//   - "pr-42"          -> "n0md3l4pP pr-42"          / com.sleipnir.n0md3l4pppascal.pr42
+//   - unset            -> "Noria"                / com.sleipnir.Noria
+//   - "staging"        -> "Noria staging"        / com.sleipnir.Noria.staging
+//   - "pr-42"          -> "Noria pr-42"          / com.sleipnir.Noria.pr42
 //
 // The PR number is injected by the workflow (.github/workflows/mobile-build.yml)
 // via EAS Build env vars, so each PR gets a separately installable APK.
 import type { ExpoConfig } from "expo/config";
 
-const BASE_NAME = "n0md3l4pP";
-const BASE_PACKAGE = "com.sleipnir.n0md3l4pppascal";
-const BASE_BUNDLE_ID = "com.sleipnir.n0md3l4pppascal";
+const BASE_NAME = "Noria";
+const BASE_PACKAGE = "com.sleipnir.Noria";
+const BASE_BUNDLE_ID = "com.sleipnir.Noria";
 
 export default (): ExpoConfig => {
   const variant = process.env.APP_VARIANT ?? "";
@@ -22,11 +22,11 @@ export default (): ExpoConfig => {
 
   const config: ExpoConfig = {
     name: BASE_NAME,
-    slug: "n0md3l4pp",
+    slug: "noria",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./src/assets/images/icon.png",
-    scheme: "n0md3l4pp",
+    scheme: "noria",
     userInterfaceStyle: "automatic",
     ios: {
       bundleIdentifier: BASE_BUNDLE_ID,

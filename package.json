@@ -1,12 +1,11 @@
 {
-  "name": "n0md3l4pp",
+  "name": "noria",
   "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "init-app": "bun scripts/init-app.ts",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:front": "bun --cwd apps/mobile start",
     "dev:front:web": "bun --cwd apps/mobile web",

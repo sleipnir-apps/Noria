@@ -87,7 +87,7 @@ jobs:
             echo "▶ Token Expo + projectId EAS ($EAS_PROJECT_ID) présents — builds mobiles activés."
           fi
 
-  # ─── Push sur develop → APK "n0md3l4pP staging" ───────────────────
+  # ─── Push sur develop → APK "Noria staging" ───────────────────
   build-preview:
     name: Build APK (staging variant)
     needs: [template-guard, expo-guard]
@@ -128,7 +128,7 @@ jobs:
 
   # ─── Push sur main → APK prod installable à côté du staging ───────
   # Tant que le projet n'est pas publié sur les stores, on distribue un
-  # APK "production-apk" (nom standard, package com.sleipnir.n0md3l4pppascal)
+  # APK "production-apk" (nom standard, package com.sleipnir.Noria)
   # qui coexiste sur le téléphone avec l'APK staging (package .staging).
   build-production-apk:
     name: Build APK (prod variant)
@@ -168,10 +168,10 @@ jobs:
         working-directory: ${{ env.EAS_PROJECT_DIR }}
         run: eas build --platform android --profile production-apk --non-interactive --no-wait
 
-  # ─── PR avec label "mobile" → APK "n0md3l4pP pr-N" ────────────────
+  # ─── PR avec label "mobile" → APK "Noria pr-N" ────────────────
   # Chaque PR labellisée "mobile" produit un APK séparément installable
-  # (package com.sleipnir.n0md3l4pppascal.prN) qui pointe vers la preview back
-  # de la PR (https://pr-N.api.n0md3l4pp.staging.sleipnir.ovh).
+  # (package com.sleipnir.Noria.prN) qui pointe vers la preview back
+  # de la PR (https://pr-N.api.noria.staging.sleipnir.ovh).
   build-pr:
     name: Build APK (PR ${{ github.event.pull_request.number }})
     needs: [template-guard, expo-guard]
@@ -229,7 +229,7 @@ jobs:
             config.build.pr.env = {
               ...(config.build.pr.env ?? {}),
               APP_VARIANT: `pr-${process.env.PR_NUMBER}`,
-              EXPO_PUBLIC_API_URL: `https://pr-${process.env.PR_NUMBER}.api.n0md3l4pp.staging.sleipnir.ovh`,
+              EXPO_PUBLIC_API_URL: `https://pr-${process.env.PR_NUMBER}.api.noria.staging.sleipnir.ovh`,
             };
 
             await Bun.write(file, `${JSON.stringify(config, null, 2)}\n`);
@@ -244,7 +244,7 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request.number;
-            const body = `## 📱 Build APK (PR) soumis\n\nUn build EAS Android a été soumis pour cette PR :\n- **App** : n0md3l4pP pr-${pr} (installable à côté des autres variantes)\n- **API** : https://pr-${pr}.api.n0md3l4pp.staging.sleipnir.ovh\n\nLe lien de téléchargement de l'APK sera disponible sur [expo.dev](https://expo.dev) → Builds quand il sera terminé.`;
+            const body = `## 📱 Build APK (PR) soumis\n\nUn build EAS Android a été soumis pour cette PR :\n- **App** : Noria pr-${pr} (installable à côté des autres variantes)\n- **API** : https://pr-${pr}.api.noria.staging.sleipnir.ovh\n\nLe lien de téléchargement de l'APK sera disponible sur [expo.dev](https://expo.dev) → Builds quand il sera terminé.`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -256,7 +256,7 @@ jobs:
   # Nécessite un compte Google Play Developer (25 $ unique) pour la
   # soumission store. Pour activer :
   #   1. Acheter le compte Google Play Developer et créer l'app dans
-  #      la Play Console (package: com.sleipnir.n0md3l4pppascal).
+  #      la Play Console (package: com.sleipnir.Noria).
   #   2. Décommenter le job ci-dessous.
   #   3. Configurer `eas submit -p android --latest` avec les credentials
   #      (service account JSON dans Infisical).

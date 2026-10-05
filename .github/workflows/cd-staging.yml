@@ -11,13 +11,13 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  PROJECT_NAME: n0md3l4pp
-  BACKEND_IMAGE_NAME: n0md3l4pp-api
-  FRONTEND_IMAGE_NAME: n0md3l4pp-front
+  PROJECT_NAME: noria
+  BACKEND_IMAGE_NAME: noria-api
+  FRONTEND_IMAGE_NAME: noria-front
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  SUBDOMAIN_SUFFIX: n0md3l4pp.staging.sleipnir.ovh
+  SUBDOMAIN_SUFFIX: noria.staging.sleipnir.ovh
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  STAGING_SUBDOMAIN: staging.n0md3l4pp.staging.sleipnir.ovh
+  STAGING_SUBDOMAIN: staging.noria.staging.sleipnir.ovh
 
 jobs:
   # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
@@ -56,7 +56,7 @@ jobs:
     env:
       NODE_ENV: test
       PORT: 3000
-      MONGODB_URI: mongodb://localhost:27017/n0md3l4pp_test
+      MONGODB_URI: mongodb://localhost:27017/noria_test
       JWT_ACCESS_SECRET: test-access-secret-min-32-characters-long-for-security
       JWT_REFRESH_SECRET: test-refresh-secret-min-32-characters-long-for-security
       JWT_ACCESS_EXPIRES_IN: 15m
@@ -258,9 +258,9 @@ jobs:
 
       - name: Create .env for preview backend
         env:
-          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
-          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
-          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+          MONGODB_URI: ${{ env.NORIA_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.NORIA_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.NORIA_JWT_REFRESH_SECRET }}
         run: |
           mkdir -p /tmp/preview-deploy
           chmod 700 /tmp/preview-deploy
@@ -433,11 +433,11 @@ jobs:
 
     env:
       REGISTRY: ghcr.io
-      PROJECT_NAME: n0md3l4pp
-      BACKEND_IMAGE_NAME: n0md3l4pp-api
-      FRONTEND_IMAGE_NAME: n0md3l4pp-front
+      PROJECT_NAME: noria
+      BACKEND_IMAGE_NAME: noria-api
+      FRONTEND_IMAGE_NAME: noria-front
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      SUBDOMAIN_SUFFIX: n0md3l4pp.staging.sleipnir.ovh
+      SUBDOMAIN_SUFFIX: noria.staging.sleipnir.ovh
 
     steps:
       - name: Compute lowercase owner
@@ -605,7 +605,7 @@ jobs:
     env:
       NODE_ENV: test
       PORT: 3000
-      MONGODB_URI: mongodb://localhost:27017/n0md3l4pp_test
+      MONGODB_URI: mongodb://localhost:27017/noria_test
       JWT_ACCESS_SECRET: test-access-secret-min-32-characters-long-for-security
       JWT_REFRESH_SECRET: test-refresh-secret-min-32-characters-long-for-security
       JWT_ACCESS_EXPIRES_IN: 15m
@@ -734,9 +734,9 @@ jobs:
 
       - name: Create .env for staging backend
         env:
-          MONGODB_URI: ${{ env.N0MD3L4PP_MONGODB_URI }}
-          JWT_ACCESS_SECRET: ${{ env.N0MD3L4PP_JWT_ACCESS_SECRET }}
-          JWT_REFRESH_SECRET: ${{ env.N0MD3L4PP_JWT_REFRESH_SECRET }}
+          MONGODB_URI: ${{ env.NORIA_MONGODB_URI }}
+          JWT_ACCESS_SECRET: ${{ env.NORIA_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.NORIA_JWT_REFRESH_SECRET }}
         run: |
           mkdir -p /tmp/staging-deploy
           chmod 700 /tmp/staging-deploy

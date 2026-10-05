@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    container_name: n0md3l4pp-api
+    container_name: noria-api
     ports:
       - "3000:3000"
     environment:
@@ -29,7 +29,7 @@ services:
       - NODE_ENV=development
       - PORT=3000
       - HOST=0.0.0.0
-      - MONGO_URL=mongodb://admin:password@mongodb:27017/n0md3l4pp?authSource=admin
+      - MONGO_URL=mongodb://admin:password@mongodb:27017/noria?authSource=admin
       - JWT_SECRET=dev_access_secret_change_me_32chars
       - JWT_REFRESH_SECRET=dev_refresh_secret_change_me_32chars
       - JWT_ACCESS_EXPIRES=15m
@@ -49,7 +49,7 @@ services:
       args:
         # URL de l'API vue depuis le navigateur (le web app tourne côté client)
         EXPO_PUBLIC_API_URL: http://localhost:3000
-    container_name: n0md3l4pp-mobile
+    container_name: noria-mobile
     ports:
       - "8080:80"
     depends_on:
