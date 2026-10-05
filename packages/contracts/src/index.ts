@@ -6,3 +6,7 @@ export * from "./auth/register";
 export * from "./auth/login";
 export * from "./items/item.schema";
 export * from "./items/item.dto";
+export * from "./tasks/task.schema";
+export * from "./tasks/task.dto";
+export * from "./tasks/occurrences";
+export * from "./sync/sync.schema";

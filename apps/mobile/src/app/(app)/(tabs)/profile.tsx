@@ -6,9 +6,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Spacing } from "@/constants/theme";
+import { OfflineBanner } from "@/components/offline-banner";
 import { useUsers } from "@/features/admin/use-users";
 import { useLogout } from "@/features/auth/use-logout";
 import { useMe } from "@/features/auth/use-me";
+import { syncQueueStore } from "@/features/sync/sync-queue";
+import { tasksStore } from "@/features/tasks/tasks.store";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -25,6 +28,8 @@ export default function ProfileScreen() {
   function handleLogout() {
     logout(undefined, {
       onSettled: () => {
+        void syncQueueStore.reset();
+        void tasksStore.replaceAll([]);
         queryClient.clear();
         router.replace("/(auth)/login");
       },
@@ -34,6 +39,7 @@ export default function ProfileScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
+        <OfflineBanner />
         <ThemedText type="subtitle">Informations personnelles</ThemedText>
         <ThemedView type="backgroundElement" style={styles.section}>
           {user ? (

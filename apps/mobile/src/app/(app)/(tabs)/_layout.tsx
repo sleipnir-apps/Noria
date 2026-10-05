@@ -24,17 +24,17 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Accueil",
-          tabBarLabel: "Accueil",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          title: "Aujourd'hui",
+          tabBarLabel: "Aujourd'hui",
+          tabBarIcon: ({ color, size }) => <Ionicons name="today" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="items"
+        name="backlog"
         options={{
-          title: "Mes Items",
-          tabBarLabel: "Items",
-          tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
+          title: "Backlog",
+          tabBarLabel: "Backlog",
+          tabBarIcon: ({ color, size }) => <Ionicons name="layers" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -45,6 +45,8 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
         }}
       />
+      {/* La démo template "items" reste accessible mais hors onglets. */}
+      <Tabs.Screen name="items" options={{ href: null }} />
     </Tabs>
   );
 }

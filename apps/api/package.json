@@ -26,6 +26,7 @@
     "bcryptjs": "^3.0.3",
     "fastify": "^5.10.0",
     "mongodb": "^6.21.0",
+    "rrule": "2.8.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

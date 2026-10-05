@@ -10,6 +10,8 @@ import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
 import { itemRoutes } from "./modules/items/item.routes";
+import { taskRoutes } from "./modules/tasks/task.routes";
+import { syncRoutes } from "./modules/sync/sync.routes";
 
 export async function buildApp() {
   const app = Fastify({
@@ -44,6 +46,15 @@ export async function buildApp() {
   await app.register(authRoutes);
   await app.register(adminRoutes);
   await app.register(itemRoutes);
+
+  // Mobile app (offline-first): versioned API + sync endpoints, under /api/v1.
+  await app.register(
+    async (apiV1) => {
+      await apiV1.register(taskRoutes);
+      await apiV1.register(syncRoutes);
+    },
+    { prefix: "/api/v1" }
+  );
 
   return app;
 }
