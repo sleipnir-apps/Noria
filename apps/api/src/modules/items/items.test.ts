@@ -33,7 +33,7 @@ describe("Items routes", () => {
     it("crée un item et retourne 201", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/items",
+        url: "/api/v1/items",
         headers: authHeader(),
         payload: { title: "Mon item", description: "Une description" },
       });
@@ -48,7 +48,7 @@ describe("Items routes", () => {
     it("retourne 400 avec un titre vide", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/items",
+        url: "/api/v1/items",
         headers: authHeader(),
         payload: { title: "" },
       });
@@ -59,7 +59,7 @@ describe("Items routes", () => {
     it("retourne 401 sans token", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/items",
+        url: "/api/v1/items",
         payload: { title: "Item" },
       });
 
@@ -76,7 +76,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/items",
+        url: "/api/v1/items",
         headers: authHeader(),
       });
 
@@ -92,7 +92,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/items",
+        url: "/api/v1/items",
         headers: authHeader(),
       });
 
@@ -106,7 +106,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/items?status=archived",
+        url: "/api/v1/items?status=archived",
         headers: authHeader(),
       });
 
@@ -123,7 +123,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/items?page=1&limit=3",
+        url: "/api/v1/items?page=1&limit=3",
         headers: authHeader(),
       });
 
@@ -142,7 +142,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
       });
 
@@ -156,7 +156,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
       });
 
@@ -166,7 +166,7 @@ describe("Items routes", () => {
     it("retourne 404 pour un id invalide", async () => {
       const res = await app.inject({
         method: "GET",
-        url: "/items/invalid-id",
+        url: "/api/v1/items/invalid-id",
         headers: authHeader(),
       });
 
@@ -182,7 +182,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "PATCH",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
         payload: { title: "Après", status: "archived" },
       });
@@ -199,7 +199,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "PATCH",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
         payload: { title: "Hack" },
       });
@@ -216,7 +216,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "DELETE",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
       });
 
@@ -224,7 +224,7 @@ describe("Items routes", () => {
 
       const check = await app.inject({
         method: "GET",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
       });
       expect(check.statusCode).toBe(404);
@@ -236,7 +236,7 @@ describe("Items routes", () => {
 
       const res = await app.inject({
         method: "DELETE",
-        url: `/items/${id}`,
+        url: `/api/v1/items/${id}`,
         headers: authHeader(),
       });
 

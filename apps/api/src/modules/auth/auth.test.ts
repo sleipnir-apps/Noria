@@ -26,7 +26,7 @@ describe("Auth routes", () => {
     it("crée un utilisateur et retourne les tokens", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/auth/register",
+        url: "/api/v1/auth/register",
         headers: MOBILE_HEADERS,
         payload: {
           email: "new@example.com",
@@ -48,7 +48,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/register",
+        url: "/api/v1/auth/register",
         headers: MOBILE_HEADERS,
         payload: {
           email: "dup@example.com",
@@ -63,7 +63,7 @@ describe("Auth routes", () => {
     it("retourne 400 si le body est invalide", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/auth/register",
+        url: "/api/v1/auth/register",
         headers: MOBILE_HEADERS,
         payload: { email: "bad-email", password: "123" },
       });
@@ -80,7 +80,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/login",
+        url: "/api/v1/auth/login",
         headers: MOBILE_HEADERS,
         payload: { email: "login@example.com", password: "password123" },
       });
@@ -96,7 +96,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/login",
+        url: "/api/v1/auth/login",
         headers: MOBILE_HEADERS,
         payload: { email: "login2@example.com", password: "wrongpassword" },
       });
@@ -107,7 +107,7 @@ describe("Auth routes", () => {
     it("retourne 401 si l'utilisateur n'existe pas", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/auth/login",
+        url: "/api/v1/auth/login",
         headers: MOBILE_HEADERS,
         payload: { email: "ghost@example.com", password: "password123" },
       });
@@ -125,7 +125,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/v1/auth/me",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
@@ -134,7 +134,7 @@ describe("Auth routes", () => {
     });
 
     it("retourne 401 sans token", async () => {
-      const res = await app.inject({ method: "GET", url: "/auth/me" });
+      const res = await app.inject({ method: "GET", url: "/api/v1/auth/me" });
       expect(res.statusCode).toBe(401);
     });
 
@@ -144,7 +144,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/v1/auth/me",
         headers: { Authorization: `Bearer ${refreshToken}` },
       });
 
@@ -161,7 +161,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/refresh",
+        url: "/api/v1/auth/refresh",
         headers: MOBILE_HEADERS,
         payload: { refreshToken },
       });
@@ -182,7 +182,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/refresh",
+        url: "/api/v1/auth/refresh",
         headers: MOBILE_HEADERS,
         payload: { refreshToken },
       });
@@ -193,7 +193,7 @@ describe("Auth routes", () => {
     it("retourne 401 avec un token invalide", async () => {
       const res = await app.inject({
         method: "POST",
-        url: "/auth/refresh",
+        url: "/api/v1/auth/refresh",
         headers: MOBILE_HEADERS,
         payload: { refreshToken: "invalid.token.here" },
       });
@@ -215,7 +215,7 @@ describe("Auth routes", () => {
 
       const res = await app.inject({
         method: "POST",
-        url: "/auth/logout",
+        url: "/api/v1/auth/logout",
         headers: { ...MOBILE_HEADERS, Authorization: `Bearer ${accessToken}` },
         payload: { refreshToken },
       });
@@ -224,7 +224,7 @@ describe("Auth routes", () => {
     });
 
     it("retourne 401 sans access token", async () => {
-      const res = await app.inject({ method: "POST", url: "/auth/logout" });
+      const res = await app.inject({ method: "POST", url: "/api/v1/auth/logout" });
       expect(res.statusCode).toBe(401);
     });
   });
