@@ -6,7 +6,7 @@ import { registerErrorHandler } from "./plugins/error-handler";
 import { registerMongoDB } from "./plugins/mongodb";
 import { registerRateLimit } from "./plugins/rate-limit";
 import { registerSwagger } from "./plugins/swagger";
-import { healthRoutes } from "./modules/health/health.route";
+import { healthRoutes, registerHealthPaths } from "./modules/health/health.route";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
@@ -42,6 +42,11 @@ export async function buildApp() {
 
   // Error handler (après les plugins)
   registerErrorHandler(app);
+
+  // Health at the root: the deployed API is served at the root and liveness
+  // probes call GET /health without the /api/v1 prefix. One shared handler
+  // and contract; the scoped /api/v1/health alias keeps working for the front.
+  registerHealthPaths(app);
 
   // Routes — every module lives under the same /api/v1 prefix; the mobile
   // EXPO_PUBLIC_API_URL points at `<host>:<port>/api/v1`.
