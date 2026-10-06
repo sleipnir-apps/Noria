@@ -3,12 +3,21 @@ import {
   CreateTaskSchema,
   OccurrenceUpdateSchema,
   RecurrenceRuleSchema,
-  SyncOperationSchema,
   SyncPullQuerySchema,
   SyncPushSchema,
   TaskRangeQuerySchema,
   UpdateTaskSchema,
+  UpcomingQuerySchema,
 } from "../index";
+
+describe("UpcomingQuerySchema", () => {
+  it("applique la fenêtre par défaut de 14 jours et borne days à 60", () => {
+    expect(UpcomingQuerySchema.parse({}).days).toBe(14);
+    expect(UpcomingQuerySchema.parse({ days: "7" }).days).toBe(7);
+    expect(UpcomingQuerySchema.safeParse({ days: 61 }).success).toBe(false);
+    expect(UpcomingQuerySchema.safeParse({ days: 0 }).success).toBe(false);
+  });
+});
 
 describe("CreateTaskSchema", () => {
   it("valide une tâche minimale (titre seul)", () => {

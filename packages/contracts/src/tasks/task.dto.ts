@@ -65,6 +65,36 @@ export const TaskOverdueResponseSchema = z.object({
 });
 export type TaskOverdueResponse = z.infer<typeof TaskOverdueResponseSchema>;
 
+// ── Upcoming (« À venir ») ───────────────────────────────────────────────────
+
+/** GET /tasks/upcoming?days=N — open items of [today, today + N days). */
+export const UpcomingQuerySchema = z.object({
+  days: z.coerce.number().int().positive().max(60).default(14),
+  /** Reference instant (tests / explicit clocks); defaults to the server now. */
+  now: IsoInstantSchema.optional(),
+});
+export type UpcomingQuery = z.infer<typeof UpcomingQuerySchema>;
+
+/** Upcoming entry: a real task, or a computed occurrence flagged isOccurrence. */
+export const UpcomingTaskSchema = TaskSchema.extend({ isOccurrence: z.boolean() });
+export type UpcomingTask = z.infer<typeof UpcomingTaskSchema>;
+
+export const UpcomingDayGroupSchema = z.object({
+  /** Day key "YYYY-MM-DD" of the group (UTC calendar server-side). */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  tasks: z.array(UpcomingTaskSchema),
+});
+export type UpcomingDayGroup = z.infer<typeof UpcomingDayGroupSchema>;
+
+export const UpcomingResponseSchema = z.object({
+  window: z.object({
+    start: z.iso.datetime(),
+    end: z.iso.datetime(),
+  }),
+  groups: z.array(UpcomingDayGroupSchema),
+});
+export type UpcomingResponse = z.infer<typeof UpcomingResponseSchema>;
+
 // ── Offline-first sync (pull + push) ─────────────────────────────────────────
 
 /** GET /sync?since=<iso> — last-write-wins watermark sync. */

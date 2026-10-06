@@ -11,6 +11,8 @@ import type {
   Task,
   TaskFilters,
   UpdateTaskDto,
+  UpcomingResponse,
+  UpcomingTask,
 } from "@template/contracts";
 import { AppError } from "../../lib/errors/AppError";
 import { isSet, TaskRepository } from "./task.repository";
@@ -82,7 +84,7 @@ function toOccurrenceDto(parent: TaskDocument, instant: Date): Task {
   return dto;
 }
 
-function sortRangeItems(items: Task[]): Task[] {
+function sortRangeItems<T extends Task>(items: T[]): T[] {
   return items.sort((a, b) => {
     const byDue = (a.dueDate ?? "").localeCompare(b.dueDate ?? "");
     if (byDue !== 0) return byDue;
@@ -90,6 +92,28 @@ function sortRangeItems(items: Task[]): Task[] {
     if (byPriority !== 0) return byPriority;
     return a.createdAt.localeCompare(b.createdAt);
   });
+}
+
+/** UTC day key used by the calendar-like views ("YYYY-MM-DD"). */
+function utcDayKey(instant: Date): string {
+  return instant.toISOString().slice(0, 10);
+}
+
+/**
+ * Group tasks by UTC calendar day, chronologically. Each task lands in the
+ * group of its dueDate (all upcoming items are dated); an empty day never
+ * yields a group.
+ */
+function groupByDay(items: UpcomingTask[]): UpcomingResponse["groups"] {
+  type Bucket = { date: string; tasks: UpcomingTask[] };
+  const groups = new Map<string, Bucket>();
+  for (const item of sortRangeItems([...items])) {
+    const day = utcDayKey(new Date(item.dueDate!));
+    const bucket = groups.get(day);
+    if (bucket !== undefined) bucket.tasks.push(item);
+    else groups.set(day, { date: day, tasks: [item] as UpcomingTask[] });
+  }
+  return [...groups.values()];
 }
 
 type AppliedList = SyncPushResponse["applied"];
@@ -269,6 +293,48 @@ export class TaskService {
     }
 
     return sortRangeItems(overdue);
+  }
+
+  /**
+   * "À venir": open dated tasks of [now, now + days) fused with the computed
+   * occurrences of active parents falling in the window (materialized
+   * occurrences excluded, same rules as getRange), grouped by UTC day and
+   * sorted chronologically. Occurrences carry isOccurrence: true.
+   */
+  async getUpcoming(userId: string, days: number, nowIso?: string): Promise<UpcomingResponse> {
+    const now = nowIso !== undefined ? parseInstant(nowIso) : new Date();
+    const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+    const [datedDocs, materialized, parents] = await Promise.all([
+      this.repo.findOpenDatedRange(userId, now, end),
+      this.repo.findInstancesByOriginalDateRange(userId, now, end),
+      this.repo.findRecurringParents(userId),
+    ]);
+
+    const instanceKey = (parentTaskId: string | undefined | null, instant: Date): string =>
+      `${parentTaskId ?? ""}:${instant.getTime()}`;
+
+    const materializedKeys = new Set(
+      materialized.map((doc) => instanceKey(doc.parentTaskId, doc.originalDueDate!))
+    );
+
+    const upcoming: UpcomingTask[] = datedDocs
+      .filter((doc) => !isRecurringParent(doc))
+      .map((doc) => ({ ...toDto(doc), isOccurrence: false }));
+
+    for (const parent of parents) {
+      if (!isSet(parent.dueDate)) continue; // unreachable: a rule implies a due date
+      const dates = expandOccurrences(parent.recurrenceRule!, parent.dueDate, { start: now, end });
+      for (const instant of dates) {
+        if (materializedKeys.has(instanceKey(parent._id!.toString(), instant))) continue;
+        upcoming.push({ ...toOccurrenceDto(parent, instant), isOccurrence: true });
+      }
+    }
+
+    return {
+      window: { start: now.toISOString(), end: end.toISOString() },
+      groups: groupByDay(upcoming),
+    };
   }
 
   /**

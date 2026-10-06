@@ -121,6 +121,19 @@ export class TaskRepository {
       .toArray();
   }
 
+  /** Open (not DONE/ARCHIVED) dated tasks in [start, end) — the upcoming view. */
+  async findOpenDatedRange(userId: string, start: Date, end: Date): Promise<TaskDocument[]> {
+    return this.col
+      .find({
+        userId,
+        deletedAt: { $eq: null },
+        dueDate: { $gte: start, $lt: end },
+        status: { $in: TASK_OPEN_STATUSES },
+      })
+      .sort({ dueDate: 1 })
+      .toArray();
+  }
+
   /** Dated tasks still open past their due date (instances included). */
   async findDatedOverdue(userId: string, now: Date): Promise<TaskDocument[]> {
     return this.col
