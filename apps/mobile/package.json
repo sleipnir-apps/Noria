@@ -37,6 +37,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },
@@ -46,6 +47,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "build": "echo 'Building mobile... (placeholder)'"
   },

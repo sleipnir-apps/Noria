@@ -9,7 +9,7 @@ import { MaxContentWidth, Radius, Spacing } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { useTheme } from "@/hooks/use-theme";
-import { DueDateFields } from "@/components/tasks/date-time-fields";
+import { InlineDateTimePicker } from "@/components/tasks/inline-date-time-picker";
 import { PriorityPicker } from "@/components/tasks/priority-picker";
 import { SubtaskList } from "@/components/tasks/subtask-list";
 import { TagInput } from "@/components/tasks/tag-input";
@@ -282,7 +282,7 @@ function EditorForm({
 
           <View style={styles.field}>
             <ThemedText type="smallBold">Échéance</ThemedText>
-            <DueDateFields
+            <InlineDateTimePicker
               dateText={values.dateText}
               timeText={values.timeText}
               onDateChange={(dateText) => setValue("dateText", dateText, { shouldValidate: true })}
