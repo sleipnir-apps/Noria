@@ -6,7 +6,7 @@ import { registerErrorHandler } from "./plugins/error-handler";
 import { registerMongoDB } from "./plugins/mongodb";
 import { registerRateLimit } from "./plugins/rate-limit";
 import { registerSwagger } from "./plugins/swagger";
-import { healthRoutes } from "./modules/health/health.route";
+import { healthRoutes, rootHealthRoutes } from "./modules/health/health.route";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
@@ -56,6 +56,9 @@ export async function buildApp() {
     },
     { prefix: API_PREFIX }
   );
+
+  // Liveness probe at the origin root (uptime monitoring hits GET /health).
+  await rootHealthRoutes(app);
 
   return app;
 }
