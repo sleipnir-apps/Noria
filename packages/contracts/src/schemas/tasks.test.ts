@@ -7,6 +7,8 @@ import {
   SyncPullQuerySchema,
   SyncPushSchema,
   TaskRangeQuerySchema,
+  TaskUpcomingQuerySchema,
+  TaskUpcomingResponseSchema,
   UpdateTaskSchema,
 } from "../index";
 
@@ -98,6 +100,87 @@ describe("TaskRangeQuerySchema", () => {
     const result = TaskRangeQuerySchema.safeParse({
       start: "2026-10-06T00:00:00Z",
       end: "2026-10-05T00:00:00Z",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("TaskUpcomingQuerySchema", () => {
+  it("défaut days = 14 quand absent", () => {
+    const result = TaskUpcomingQuerySchema.safeParse({});
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.days).toBe(14);
+  });
+
+  it("accepte days = 1 et days = 60 (bornes)", () => {
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "1" }).success).toBe(true);
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "60" }).success).toBe(true);
+  });
+
+  it("rejette days > 60", () => {
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "61" }).success).toBe(false);
+  });
+
+  it("rejette days = 0 et négatif", () => {
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "0" }).success).toBe(false);
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "-3" }).success).toBe(false);
+  });
+
+  it("rejette days non numérique", () => {
+    expect(TaskUpcomingQuerySchema.safeParse({ days: "beaucoup" }).success).toBe(false);
+  });
+});
+
+describe("TaskUpcomingResponseSchema", () => {
+  const occurrenceTask = {
+    id: "occ:6515e1a0f2d3c4b5a6d7e8f9:2026-01-13T00:00:00.000Z",
+    userId: "6515e1a0f2d3c4b5a6d7e8f8",
+    title: "Sprint",
+    priority: "P3",
+    status: "TODO",
+    hasTime: false,
+    tags: [],
+    subtasks: [],
+    dueDate: "2026-01-13T00:00:00.000Z",
+    isOccurrence: true,
+    parentTaskId: "6515e1a0f2d3c4b5a6d7e8f9",
+    originalDueDate: "2026-01-13T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("valide des groupes quotidiens avec occurrence marquée", () => {
+    const result = TaskUpcomingResponseSchema.safeParse({
+      generatedAt: "2026-01-13T10:00:00.000Z",
+      data: [
+        { date: "2026-01-13", tasks: [occurrenceTask] },
+        { date: "2026-01-15", tasks: [] },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejette une date hors format YYYY-MM-DD", () => {
+    const result = TaskUpcomingResponseSchema.safeParse({
+      data: [{ date: "13/01/2026", tasks: [] }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejette des groupes non chronologiques", () => {
+    const result = TaskUpcomingResponseSchema.safeParse({
+      data: [
+        { date: "2026-01-15", tasks: [] },
+        { date: "2026-01-13", tasks: [] },
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejette des tâches non triées dans un jour", () => {
+    const later = { ...occurrenceTask, dueDate: "2026-01-13T18:00:00.000Z", id: "occ:x:later" };
+    const result = TaskUpcomingResponseSchema.safeParse({
+      data: [{ date: "2026-01-13", tasks: [later, occurrenceTask] }],
     });
     expect(result.success).toBe(false);
   });

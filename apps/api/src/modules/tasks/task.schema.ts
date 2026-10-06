@@ -85,6 +85,18 @@ export const overdueTasksRouteSchema: FastifySchema = {
   },
 };
 
+export const upcomingTasksRouteSchema: FastifySchema = {
+  tags: ["Tasks"],
+  summary: "Dated open tasks + computed occurrences for the next N days, grouped by day",
+  querystring: {
+    type: "object",
+    properties: {
+      days: { type: "number", default: 14, minimum: 1, maximum: 60 },
+      now: { type: "string" },
+    },
+  },
+};
+
 export const occurrenceParamsSchema: FastifySchema = {
   tags: ["Tasks"],
   params: {

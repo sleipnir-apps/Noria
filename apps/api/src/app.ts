@@ -6,7 +6,7 @@ import { registerErrorHandler } from "./plugins/error-handler";
 import { registerMongoDB } from "./plugins/mongodb";
 import { registerRateLimit } from "./plugins/rate-limit";
 import { registerSwagger } from "./plugins/swagger";
-import { healthRoutes } from "./modules/health/health.route";
+import { healthRoutes, rootHealthRoutes } from "./modules/health/health.route";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
@@ -44,7 +44,10 @@ export async function buildApp() {
   registerErrorHandler(app);
 
   // Routes — every module lives under the same /api/v1 prefix; the mobile
-  // EXPO_PUBLIC_API_URL points at `<host>:<port>/api/v1`.
+  // EXPO_PUBLIC_API_URL points at `<host>:<port>/api/v1`. The root /health is
+  // registered OUTSIDE the scoped plugin: the deployed API is served at /
+  // and uptime probes must not 404.
+  await app.register(rootHealthRoutes);
   await app.register(
     async (api: FastifyInstance) => {
       await api.register(healthRoutes);

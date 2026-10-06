@@ -7,6 +7,9 @@ import {
   TaskStatusSchema,
 } from "./task.schema";
 
+// Re-export: shared ISO-instant schema (also used by upcoming.dto).
+export { IsoInstantSchema };
+
 export const TaskSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -22,6 +25,8 @@ export const TaskSchema = z.object({
   // Instances of a recurring task (materialized occurrences).
   parentTaskId: z.string().optional(),
   originalDueDate: z.iso.datetime().optional(),
+  /** Wire marker of computed occurrences (upcoming/range views) — never stored. */
+  isOccurrence: z.boolean().optional(),
   deletedAt: z.iso.datetime().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),

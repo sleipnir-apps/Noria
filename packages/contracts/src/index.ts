@@ -8,3 +8,4 @@ export * from "./items/item.schema";
 export * from "./items/item.dto";
 export * from "./tasks/task.schema";
 export * from "./tasks/task.dto";
+export * from "./tasks/upcoming.dto";

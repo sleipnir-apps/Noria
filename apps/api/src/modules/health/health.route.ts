@@ -23,3 +23,9 @@ export async function healthRoutes(app: FastifyInstance) {
     healthController
   );
 }
+
+/** Same handler, but registered at the ROOT: the deployed API is served at /
+ * (no /api/v1), so uptime probes target GET /health. */
+export function rootHealthRoutes(app: FastifyInstance) {
+  app.get("/health", healthController);
+}

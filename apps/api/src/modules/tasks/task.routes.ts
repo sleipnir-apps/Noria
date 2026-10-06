@@ -4,6 +4,7 @@ import {
   OccurrenceUpdateSchema,
   TaskFiltersSchema,
   TaskRangeQuerySchema,
+  TaskUpcomingQuerySchema,
   UpdateTaskSchema,
 } from "@template/contracts";
 import { TaskService } from "./task.service";
@@ -15,6 +16,7 @@ import {
   patchOccurrenceRouteSchema,
   rangeTasksRouteSchema,
   taskParamsSchema,
+  upcomingTasksRouteSchema,
   updateTaskRouteSchema,
 } from "./task.schema";
 
@@ -69,6 +71,18 @@ export async function taskRoutes(app: FastifyInstance) {
       const now = (request.query as { now?: string } | undefined)?.now;
       const data = await service.getOverdue(request.user.sub, now);
       return reply.send({ since: now ?? new Date().toISOString(), data });
+    }
+  );
+
+  // GET /tasks/upcoming?days=N — grouped by local day, chronologically sorted
+  app.get(
+    "/tasks/upcoming",
+    { preValidation: [app.authenticate], schema: upcomingTasksRouteSchema },
+    async (request: AuthRequest, reply: FastifyReply) => {
+      const parsed = TaskUpcomingQuerySchema.safeParse(request.query);
+      if (!parsed.success) throw AppError.validation("Horizon invalide", parsed.error.issues);
+      const body = await service.getUpcoming(request.user.sub, parsed.data.days, parsed.data.now);
+      return reply.send(body);
     }
   );
 

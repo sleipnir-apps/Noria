@@ -16,6 +16,8 @@ import { AppError } from "../../lib/errors/AppError";
 import { isSet, TaskRepository } from "./task.repository";
 import type { TaskDocument, TaskUnsetKey } from "./task.repository";
 import { expandOccurrences } from "./task-recurrence";
+import { groupByLocalDay, upcomingWindow } from "./task-upcoming";
+import type { TaskUpcomingResponse, UpcomingDay } from "@template/contracts";
 
 /** Occurrence ids are synthetic: nothing is stored in MongoDB for them. */
 const OCCURRENCE_ID_PREFIX = "occ";
@@ -269,6 +271,30 @@ export class TaskService {
     }
 
     return sortRangeItems(overdue);
+  }
+
+  /**
+   * GET /tasks/upcoming builder: the fused range view grouped by local
+   * calendar day. Spec: dated open tasks (DONE/ARCHIVED/soft-deleted
+   * excluded) + virtual occurrences (materialized ones replaced by their
+   * instance). The range view already fuses and dedupes; this method applies
+   * the upcoming-specific status filter on stored docs only — a DONE
+   * INSTANCE still shows as completed, a DONE dated one-off does not.
+   */
+  async getUpcoming(userId: string, days: number, nowIso?: string): Promise<TaskUpcomingResponse> {
+    const now = nowIso ? parseInstant(nowIso) : new Date();
+    const { start, end } = upcomingWindow(now, days);
+    const items: Task[] = await this.getRange(userId, start.toISOString(), end.toISOString());
+    const visible = items.filter(
+      (task) => task.id.startsWith("occ:") || (task.status !== "DONE" && task.status !== "ARCHIVED")
+    );
+    const data: UpcomingDay[] = groupByLocalDay(visible).map((day) => ({
+      date: day.date,
+      tasks: day.tasks.map((task) =>
+        task.id.startsWith("occ:") ? { ...task, isOccurrence: true } : task
+      ),
+    }));
+    return { generatedAt: new Date().toISOString(), data };
   }
 
   /**
