@@ -71,6 +71,18 @@ export interface ParsedDateTime {
 }
 
 /**
+ * Midnight-local ISO instant (with offset) of a "YYYY-MM-DD" local day key —
+ * the exact shape `parseDueDateInput` produces for a date without time, so
+ * the picker writes what the form expects.
+ */
+export function dayKeyToIso(dateKey: string): string {
+  const parsed = parseLocalDayKey(dateKey);
+  if (parsed === null) return "";
+  const midnight = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return `${localDateText(midnight)}T00:00:00${localOffset(midnight)}`;
+}
+
+/**
  * Build dueDate (ISO with local offset) + hasTime from form inputs.
  * Returns null on unparsable input — the form keeps Zod in charge of messages.
  */
