@@ -59,6 +59,16 @@ export function TaskCard({ item, onOpen, onToggleDone, isOverdue = false }: Task
             {task.title}
           </ThemedText>
           <View style={styles.meta}>
+            <View
+              style={[
+                styles.priorityBadge,
+                { backgroundColor: theme[PRIORITY_COLOR[task.priority]] },
+              ]}
+            >
+              <ThemedText type="small" themeColor="onPrimary" style={styles.badgeText}>
+                {task.priority}
+              </ThemedText>
+            </View>
             {task.dueDate !== undefined && (
               <View style={styles.chip}>
                 <Ionicons
@@ -80,6 +90,7 @@ export function TaskCard({ item, onOpen, onToggleDone, isOverdue = false }: Task
               <View style={styles.chip}>
                 <Ionicons name="repeat" size={12} color={theme.primary} />
                 <ThemedText type="small" themeColor="textSecondary" style={styles.chipText}>
+                  🔁{" "}
                   {item.isOccurrence || task.parentTaskId === undefined
                     ? "Récurrent"
                     : "Occurrence"}
@@ -177,6 +188,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 2,
+  },
+  priorityBadge: {
+    borderRadius: Radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  badgeText: {
+    fontSize: FontSizes.xs,
+    fontWeight: "700",
   },
   tagChip: {
     borderRadius: Radius.sm,

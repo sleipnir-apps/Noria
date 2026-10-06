@@ -3,7 +3,9 @@ import { taskStore, type TaskStoreState } from "@/store/task.store";
 import {
   computeBacklog,
   computeTodaySections,
+  computeUpcomingGroups,
   type TodaySections,
+  type UpcomingGroup,
 } from "@/features/tasks/task-views";
 
 /** Subscribe a component to the offline-first task store. */
@@ -21,4 +23,10 @@ export function useTodaySections(): TodaySections {
 export function useBacklogTasks() {
   const { tasks } = useTasksState();
   return computeBacklog(tasks);
+}
+
+/** "À venir": day groups of the next `days` days, recomputed on each store update. */
+export function useUpcomingGroups(days = 14): UpcomingGroup[] {
+  const { tasks } = useTasksState();
+  return computeUpcomingGroups(tasks, days, new Date());
 }

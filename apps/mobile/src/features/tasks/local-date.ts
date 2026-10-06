@@ -92,3 +92,18 @@ export function formatLongDay(date: Date): string {
     month: "long",
   }).format(date);
 }
+
+/**
+ * Group header of the "À venir" list: "Aujourd'hui", "Demain" or
+ * "jeudi 15 janvier" for the days further out.
+ */
+export function formatUpcomingDayLabel(dayKey: string, today: Date): string {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) return dayKey;
+  const date = new Date(year, month - 1, day);
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dayDiff = Math.round((date.getTime() - todayStart.getTime()) / 86_400_000);
+  if (dayDiff === 0) return "Aujourd'hui";
+  if (dayDiff === 1) return "Demain";
+  return formatLongDay(date);
+}

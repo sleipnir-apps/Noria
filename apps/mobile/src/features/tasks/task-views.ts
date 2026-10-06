@@ -1,6 +1,6 @@
 import type { LocalTask } from "@/store/task.store";
 import { expandOccurrences, isMaterialized } from "@/features/tasks/occurrences";
-import { todayWindow } from "@/features/tasks/local-date";
+import { localDayKey, todayWindow } from "@/features/tasks/local-date";
 
 /**
  * All views work on the local dataset (works offline). Occurrences are
@@ -162,6 +162,66 @@ export function computeBacklog(tasks: Record<string, LocalTask>): TaskItem[] {
       return a.createdAt.localeCompare(b.createdAt);
     })
     .map(itemFromTask);
+}
+
+/** One chronological day group of the "À venir" view. */
+export interface UpcomingGroup {
+  /** Local day key "YYYY-MM-DD". */
+  date: string;
+  items: TaskItem[];
+}
+
+/**
+ * "À venir": every open dated task (instances included, recurring parents
+ * excluded) and every un-materialized occurrence of [today, today + days),
+ * grouped by local day — empty days yield no group. Chronological order.
+ */
+export function computeUpcomingGroups(
+  tasks: Record<string, LocalTask>,
+  days: number,
+  now: Date
+): UpcomingGroup[] {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(start.getTime() + days * 86_400_000);
+
+  const byDay = new Map<string, TaskItem[]>();
+
+  const collect = (item: TaskItem): void => {
+    const dueIso = item.task.dueDate;
+    if (dueIso === undefined) return;
+    const dueMs = new Date(dueIso).getTime();
+    if (dueMs < start.getTime() || dueMs >= end.getTime()) return;
+    const day = localDayKey(dueIso);
+    const bucket = byDay.get(day);
+    if (bucket !== undefined) bucket.push(item);
+    else byDay.set(day, [item]);
+  };
+
+  for (const task of Object.values(tasks)) {
+    if (task.deletedAt !== undefined || task.status === "ARCHIVED") continue;
+    if (isRecurringParent(task)) {
+      for (const occurrence of occurrencesInWindow(tasks, task, { start, end })) {
+        collect(occurrence);
+      }
+      continue;
+    }
+    if (task.status === "DONE") continue; // an instance completed stays hidden
+    if (task.dueDate === undefined) continue; // backlog is not part of "à venir"
+    collect(itemFromTask(task));
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, items]) => ({
+      date,
+      items: items.sort((a, b) => {
+        const dueDiff = (a.task.dueDate ?? "").localeCompare(b.task.dueDate ?? "");
+        if (dueDiff !== 0) return dueDiff;
+        const priorityDiff = PRIORITY_ORDER[a.task.priority] - PRIORITY_ORDER[b.task.priority];
+        if (priorityDiff !== 0) return priorityDiff;
+        return a.task.createdAt.localeCompare(b.task.createdAt);
+      }),
+    }));
 }
 
 /** Weekday short label keyed by the rrule convention (0 = Monday … 6 = Sunday). */
