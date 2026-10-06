@@ -1,6 +1,6 @@
 import type { LocalTask } from "@/store/task.store";
 import { expandOccurrences, isMaterialized } from "@/features/tasks/occurrences";
-import { todayWindow } from "@/features/tasks/local-date";
+import { MS_PER_DAY, localDayKey, todayWindow } from "@/features/tasks/local-date";
 
 /**
  * All views work on the local dataset (works offline). Occurrences are
@@ -168,6 +168,61 @@ export function computeBacklog(tasks: Record<string, LocalTask>): TaskItem[] {
 export const weekdayLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"] as const;
 
 export const weekdayLabel = (index: number): string => weekdayLabels[index] ?? "";
+
+/** Name of the "À venir" tab: default window length in days (API max is 60). */
+export const UPCOMING_DAYS = 14;
+
+export interface UpcomingDayGroup {
+  /** Local calendar day key "YYYY-MM-DD". */
+  date: string;
+  items: TaskItem[];
+}
+
+/**
+ * Day groups of the "À venir" tab: dated open tasks and occurrences of the
+ * next `days` local days (excluding materialized ones), grouped by local
+ * calendar day — empty days never produce a group. Groups are sorted
+ * chronologically, items keep the shared range sort inside a day.
+ */
+export function computeUpcomingGroups(
+  tasks: Record<string, LocalTask>,
+  now: Date,
+  days: number = UPCOMING_DAYS
+): UpcomingDayGroup[] {
+  const start = todayWindow(now).start;
+  const end = new Date(start.getTime() + days * MS_PER_DAY);
+
+  const byDate = new Map<string, TaskItem[]>();
+  const groupOf = (date: string): TaskItem[] => {
+    const existing = byDate.get(date);
+    if (existing !== undefined) return existing;
+    const created: TaskItem[] = [];
+    byDate.set(date, created);
+    return created;
+  };
+
+  for (const task of Object.values(tasks)) {
+    if (task.deletedAt !== undefined || task.status === "ARCHIVED") continue;
+
+    if (isRecurringParent(task)) {
+      for (const occurrence of occurrencesInWindow(tasks, task, { start, end })) {
+        groupOf(localDayKey(occurrence.originalDueDate!)).push(occurrence);
+      }
+      continue;
+    }
+
+    if (task.status === "DONE" || !isSet(task.dueDate)) continue;
+
+    const dueMs = new Date(task.dueDate).getTime();
+    if (dueMs < start.getTime() || dueMs >= end.getTime()) continue;
+
+    groupOf(localDayKey(task.dueDate)).push(itemFromTask(task));
+  }
+
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, items]) => ({ date, items: items.sort(sortRangeItems) }));
+}
 
 /** Summary text of a rule ("Chaque semaine (Lun, Mer)"). */
 export function recurrenceSummary(rule: NonNullable<LocalTask["recurrenceRule"]>): string {
