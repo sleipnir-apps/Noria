@@ -1,4 +1,5 @@
 import { MongoClient } from "mongodb";
+import bcrypt from "bcryptjs";
 import { env } from "../config/env";
 
 async function seedDevelopment(): Promise<void> {
@@ -16,11 +17,11 @@ async function seedDevelopment(): Promise<void> {
     await db.collection("users").updateOne(
       { email: "admin@example.test" },
       {
-        $setOnInsert: {
+        $set: {
           email: "admin@example.test",
           displayName: "Development Admin",
           role: "admin",
-          passwordHash: "REPLACE_WITH_A_REAL_HASH_WHEN_AUTH_IS_IMPLEMENTED",
+          passwordHash: await bcrypt.hash("admin-noria123", 10),
           createdAt: new Date(),
           updatedAt: new Date(),
         },

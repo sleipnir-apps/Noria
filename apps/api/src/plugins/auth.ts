@@ -2,9 +2,12 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyJwt from "@fastify/jwt";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { env } from "../config/env";
+import { API_PREFIX } from "../config/api-prefix";
 import { AppError } from "../lib/errors/AppError";
 
 const REFRESH_COOKIE_NAME = "refresh_token";
+/** Cookie is scoped to the auth endpoints under the API prefix. */
+const REFRESH_COOKIE_PATH = `${API_PREFIX}/auth`;
 
 // How the client tells us where it wants the refresh token delivered.
 // "web"   → httpOnly cookie (JS cannot read it → XSS-safe).
@@ -152,7 +155,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       httpOnly: true,
       secure: isSecureCookie(),
       sameSite: env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/auth",
+      path: REFRESH_COOKIE_PATH,
       maxAge: 90 * 24 * 60 * 60, // 90 days, mirrors JWT_REFRESH_EXPIRES
     });
   });
@@ -162,7 +165,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       httpOnly: true,
       secure: isSecureCookie(),
       sameSite: env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/auth",
+      path: REFRESH_COOKIE_PATH,
     });
   });
 

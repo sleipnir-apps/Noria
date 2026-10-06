@@ -30,7 +30,7 @@ describe("Admin routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/admin/users",
+        url: "/api/v1/admin/users",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
@@ -52,7 +52,7 @@ describe("Admin routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/admin/users",
+        url: "/api/v1/admin/users",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
@@ -60,7 +60,7 @@ describe("Admin routes", () => {
     });
 
     it("retourne 401 sans token", async () => {
-      const res = await app.inject({ method: "GET", url: "/admin/users" });
+      const res = await app.inject({ method: "GET", url: "/api/v1/admin/users" });
       expect(res.statusCode).toBe(401);
     });
 
@@ -78,7 +78,7 @@ describe("Admin routes", () => {
 
       const res = await app.inject({
         method: "GET",
-        url: "/admin/users?page=1&limit=3",
+        url: "/api/v1/admin/users?page=1&limit=3",
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
