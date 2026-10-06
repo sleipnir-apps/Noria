@@ -530,6 +530,222 @@ describe("Tasks routes", () => {
     });
   });
 
+  // ── Upcoming (« À venir ») ───────────────────────────────────────────────
+
+  describe("GET /tasks/upcoming", () => {
+    // now = mardi 13 janvier 10h → fenêtre défaut : [13T00:00Z, 27T00:00Z)
+    const NOW = "2026-01-13T10:00:00.000Z";
+
+    it("retourne 401 sans token", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/tasks/upcoming" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("regroupe par jour chronologiquement (jours vides omis) et marque les occurrences", async () => {
+      const parent = await createWeeklyTask(); // lundis : 5, 12, 19, 26
+      await seedTask(app, userId, {
+        title: "Urgente",
+        priority: "P1",
+        dueDate: new Date("2026-01-13T08:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "Course",
+        priority: "P2",
+        dueDate: new Date("2026-01-13T09:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "Plus tard",
+        dueDate: new Date("2026-01-15T00:00:00Z"),
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?now=${NOW}`,
+        headers: authHeader(),
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.days).toBe(14); // défaut sans paramètre
+      expect(body.start).toBe("2026-01-13T00:00:00.000Z");
+      expect(body.end).toBe("2026-01-27T00:00:00.000Z");
+
+      // Jours vides (16, 17, 18, 20…) omis.
+      expect(body.data.map((g: { date: string }) => g.date)).toEqual([
+        "2026-01-13",
+        "2026-01-15",
+        "2026-01-19",
+        "2026-01-26",
+      ]);
+
+      const today = body.data[0].tasks;
+      expect(today.map((t: { title: string }) => t.title)).toEqual(["Urgente", "Course"]);
+
+      const monday19 = body.data[2].tasks;
+      expect(monday19).toHaveLength(1);
+      expect(monday19[0].id).toBe(`occ:${parent.id}:${MON_3}`);
+      expect(monday19[0].isOccurrence).toBe(true);
+      expect(monday19[0].parentTaskId).toBe(parent.id);
+      expect(monday19[0].title).toBe("Rendez-vous hebdo"); // infos du parent
+      expect(monday19[0].dueDate).toBe(MON_3);
+    });
+
+    it("respecte les bornes de fenêtre (aujourd'hui inclus, hier et end exclus)", async () => {
+      await seedTask(app, userId, {
+        title: "Aujourd'hui minuit",
+        dueDate: new Date("2026-01-13T00:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "Aujourd'hui soir",
+        dueDate: new Date("2026-01-13T23:59:00Z"),
+      });
+      await seedTask(app, userId, { title: "Hier", dueDate: new Date("2026-01-12T23:00:00Z") });
+      await seedTask(app, userId, {
+        title: "Fin de fenêtre exacte",
+        dueDate: new Date("2026-01-27T00:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "Juste après la fin",
+        dueDate: new Date("2026-01-27T00:01:00Z"),
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?now=${NOW}`,
+        headers: authHeader(),
+      });
+
+      const data = res.json().data;
+      const titles = data.flatMap((g: { tasks: { title: string }[] }) =>
+        g.tasks.map((t) => t.title)
+      );
+      expect(titles).toContain("Aujourd'hui minuit");
+      expect(titles).toContain("Aujourd'hui soir");
+      expect(titles).not.toContain("Hier"); // avant la fenêtre
+      expect(titles).not.toContain("Fin de fenêtre exacte"); // end exclu (bornes [start, end))
+      expect(titles).not.toContain("Juste après la fin");
+
+      // days=15 élargit la fenêtre d'un jour : la borne end devient incluse.
+      const wider = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?days=15&now=${NOW}`,
+        headers: authHeader(),
+      });
+      const wideTitles = wider
+        .json()
+        .data.flatMap((g: { tasks: { title: string }[] }) => g.tasks.map((t) => t.title));
+      expect(wideTitles).toContain("Juste après la fin");
+      expect(wider.json().days).toBe(15);
+    });
+
+    it("exclut DONE, ARCHIVED, soft-deleted, autres utilisateurs", async () => {
+      await seedTask(app, userId, {
+        title: "Déjà finie",
+        status: "DONE",
+        dueDate: new Date("2026-01-16T00:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "Archivée",
+        status: "ARCHIVED",
+        dueDate: new Date("2026-01-17T00:00:00Z"),
+      });
+      await seedTask(app, userId, {
+        title: "En cours",
+        status: "IN_PROGRESS",
+        dueDate: new Date("2026-01-18T00:00:00Z"),
+      });
+      const doomed = await seedTask(app, userId, {
+        title: "Supprimée",
+        dueDate: new Date("2026-01-14T00:00:00Z"),
+      });
+      await app.inject({
+        method: "DELETE",
+        url: `/api/v1/tasks/${doomed.id}`,
+        headers: authHeader(),
+      });
+      const other = await seedUser(app, { email: "other-upcoming@example.com" });
+      await seedTask(app, other.id, {
+        title: "Chez l'autre",
+        dueDate: new Date("2026-01-20T00:00:00Z"),
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?now=${NOW}`,
+        headers: authHeader(),
+      });
+
+      const titles = res
+        .json()
+        .data.flatMap((g: { tasks: { title: string }[] }) => g.tasks.map((t) => t.title));
+      expect(titles).not.toContain("Déjà finie");
+      expect(titles).not.toContain("Archivée");
+      expect(titles).not.toContain("Supprimée");
+      expect(titles).not.toContain("Chez l'autre");
+      expect(titles).toContain("En cours");
+    });
+
+    it("exclut les occurrences matérialisées, même statut DONE (disparaissent de la vue)", async () => {
+      const parent = await createWeeklyTask();
+
+      // L'occurrence du lundi 19 est terminée : ni occurrence ni instance ouverte.
+      await app.inject({
+        method: "PATCH",
+        url: `/api/v1/tasks/${parent.id}/occurrences/${MON_3}`,
+        headers: authHeader(),
+        payload: { status: "DONE" },
+      });
+      // Celle du lundi 26 est en cours : l'instance remplace l'occurrence.
+      await app.inject({
+        method: "PATCH",
+        url: `/api/v1/tasks/${parent.id}/occurrences/${MON_4}`,
+        headers: authHeader(),
+        payload: { status: "IN_PROGRESS" },
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?now=${NOW}`,
+        headers: authHeader(),
+      });
+
+      const body = res.json();
+      // Le 19 est terminé → jour vide (ni occurrence, ni instance ouverte, ni instance DONE).
+      expect(body.data.map((g: { date: string }) => g.date)).toEqual(["2026-01-26"]);
+
+      const inProgress = body.data[0].tasks as Array<{
+        id: string;
+        status: string;
+        parentTaskId: string;
+        originalDueDate: string;
+        isOccurrence?: boolean;
+      }>;
+      expect(inProgress).toHaveLength(1);
+      expect(inProgress[0]?.status).toBe("IN_PROGRESS");
+      expect(inProgress[0]?.parentTaskId).toBe(parent.id);
+      expect(inProgress[0]?.originalDueDate).toBe(MON_4);
+      expect(inProgress[0]?.id.startsWith("occ:")).toBe(false); // vraie instance stockée
+      expect(inProgress[0]?.isOccurrence).toBeUndefined();
+    });
+
+    it("rejette une fenêtre invalide (days hors [1, 60])", async () => {
+      for (const days of ["0", "61"]) {
+        const res = await app.inject({
+          method: "GET",
+          url: `/api/v1/tasks/upcoming?days=${days}&now=${NOW}`,
+          headers: authHeader(),
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      const notNumber = await app.inject({
+        method: "GET",
+        url: `/api/v1/tasks/upcoming?days=quatorze&now=${NOW}`,
+        headers: authHeader(),
+      });
+      expect(notNumber.statusCode).toBe(400);
+    });
+  });
+
   // ── Soft delete ──────────────────────────────────────────────────────────
 
   describe("DELETE /tasks/:id", () => {

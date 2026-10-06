@@ -10,10 +10,11 @@ import type {
   SyncPushResponse,
   Task,
   TaskFilters,
+  TaskUpcomingResponse,
   UpdateTaskDto,
 } from "@template/contracts";
 import { AppError } from "../../lib/errors/AppError";
-import { isSet, TaskRepository } from "./task.repository";
+import { isSet, TaskRepository, TASK_OPEN_STATUSES } from "./task.repository";
 import type { TaskDocument, TaskUnsetKey } from "./task.repository";
 import { expandOccurrences } from "./task-recurrence";
 
@@ -21,6 +22,8 @@ import { expandOccurrences } from "./task-recurrence";
 const OCCURRENCE_ID_PREFIX = "occ";
 
 const PRIORITY_SORT: Task["priority"][] = ["P1", "P2", "P3", "P4"];
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 type SyncCreateOp = Extract<SyncOperation, { type: "CREATE" }>;
 type SyncUpdateOp = Extract<SyncOperation, { type: "UPDATE" }>;
@@ -79,6 +82,7 @@ function toOccurrenceDto(parent: TaskDocument, instant: Date): Task {
   dto.recurrenceRule = undefined;
   dto.parentTaskId = parent._id!.toString();
   dto.originalDueDate = instantIso;
+  dto.isOccurrence = true;
   return dto;
 }
 
@@ -208,33 +212,41 @@ export class TaskService {
   async getRange(userId: string, startIso: string, endIso: string): Promise<Task[]> {
     const start = parseInstant(startIso);
     const end = parseInstant(endIso);
+    return this.collectCalendarItems(userId, start, end);
+  }
 
-    const [datedDocs, materialized, parents] = await Promise.all([
-      this.repo.findDatedRange(userId, start, end),
-      this.repo.findInstancesByOriginalDateRange(userId, start, end),
-      this.repo.findRecurringParents(userId),
-    ]);
+  /**
+   * "À venir": day-grouped open dated tasks + computed occurrences over
+   * [start of today, start of today + `days` days) — the same fusion rules as
+   * /tasks/range, further filtered to open statuses (a completed occurrence
+   * disappears: its materialized instance owns the instant and is itself not
+   * displayed). `nowIso` mirrors GET /tasks/overdue's `now`: window anchor
+   * override (default: the server clock). Days are UTC calendar days.
+   */
+  async getUpcoming(userId: string, days: number, nowIso?: string): Promise<TaskUpcomingResponse> {
+    const now = nowIso !== undefined ? parseInstant(nowIso) : new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const end = new Date(start.getTime() + days * MS_PER_DAY);
 
-    const instanceKey = (parentTaskId: string | undefined | null, instant: Date): string =>
-      `${parentTaskId ?? ""}:${instant.getTime()}`;
-
-    const materializedKeys = new Set(
-      materialized.map((doc) => instanceKey(doc.parentTaskId, doc.originalDueDate!))
+    const calendarItems = await this.collectCalendarItems(userId, start, end);
+    const openItems = calendarItems.filter(
+      (item) => item.isOccurrence === true || TASK_OPEN_STATUSES.includes(item.status)
     );
 
-    const occurrences: Task[] = [];
-    for (const parent of parents) {
-      if (!isSet(parent.dueDate)) continue; // unreachable: a rule implies a due date
-      const dates = expandOccurrences(parent.recurrenceRule!, parent.dueDate, { start, end });
-      for (const instant of dates) {
-        if (materializedKeys.has(instanceKey(parent._id!.toString(), instant))) continue;
-        occurrences.push(toOccurrenceDto(parent, instant));
+    // The items come out sorted chronologically, so equal UTC days are adjacent.
+    const data: TaskUpcomingResponse["data"] = [];
+    for (const task of openItems) {
+      if (task.dueDate === undefined) continue;
+      const date = task.dueDate.slice(0, 10);
+      const lastGroup = data.at(-1);
+      if (lastGroup !== undefined && lastGroup.date === date) {
+        lastGroup.tasks.push(task);
+      } else {
+        data.push({ date, tasks: [task] });
       }
     }
 
-    const dated = datedDocs.filter((doc) => !isRecurringParent(doc)).map((doc) => toDto(doc));
-
-    return sortRangeItems([...dated, ...occurrences]);
+    return { start: start.toISOString(), end: end.toISOString(), days, data };
   }
 
   /** Open tasks past their due date + the latest missed occurrence of each parent. */
@@ -443,6 +455,42 @@ export class TaskService {
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
+
+  /**
+   * Calendar fusion shared by /range and /upcoming: every stored dated task
+   * (any status) plus the computed occurrences of active recurring parents,
+   * with occurrences already materialized in the window excluded. Chronologically
+   * sorted (date, then priority, then creation).
+   */
+  private async collectCalendarItems(userId: string, start: Date, end: Date): Promise<Task[]> {
+    const [datedDocs, materialized, parents] = await Promise.all([
+      this.repo.findDatedRange(userId, start, end),
+      this.repo.findInstancesByOriginalDateRange(userId, start, end),
+      this.repo.findRecurringParents(userId),
+    ]);
+
+    const instanceKey = (parentTaskId: string | undefined | null, instant: Date): string =>
+      `${parentTaskId ?? ""}:${instant.getTime()}`;
+
+    const materializedKeys = new Set(
+      materialized.map((doc) => instanceKey(doc.parentTaskId, doc.originalDueDate!))
+    );
+
+    const occurrences: Task[] = [];
+    for (const parent of parents) {
+      if (!isSet(parent.dueDate)) continue; // unreachable: a rule implies a due date
+      const dates = expandOccurrences(parent.recurrenceRule!, parent.dueDate, { start, end });
+      for (const instant of dates) {
+        if (materializedKeys.has(instanceKey(parent._id!.toString(), instant))) continue;
+        occurrences.push(toOccurrenceDto(parent, instant));
+      }
+    }
+
+    // The recurring parent itself never appears: its occurrences stand in.
+    const dated = datedDocs.filter((doc) => !isRecurringParent(doc)).map((doc) => toDto(doc));
+
+    return sortRangeItems([...dated, ...occurrences]);
+  }
 
   private conflictEntry(
     opId: string,
