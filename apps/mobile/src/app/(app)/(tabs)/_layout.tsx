@@ -40,6 +40,16 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="upcoming"
+        options={{
+          title: "À venir",
+          tabBarLabel: "À venir",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-number" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Mon Profil",
