@@ -134,6 +134,24 @@ export class TaskRepository {
       .toArray();
   }
 
+  /**
+   * Upcoming view: dated open tasks of [start, end) whose due date is not
+   * before the window start — DONE / ARCHIVED / soft-deleted excluded,
+   * instances included (the recurring parent itself never matches: a rule
+   * implies a due date, but instances carry parentTaskId ≠ null).
+   */
+  async findDatedUpcoming(userId: string, start: Date, end: Date): Promise<TaskDocument[]> {
+    return this.col
+      .find({
+        userId,
+        deletedAt: { $eq: null },
+        dueDate: { $gte: start, $lt: end },
+        status: { $in: TASK_OPEN_STATUSES },
+      })
+      .sort({ dueDate: 1 })
+      .toArray();
+  }
+
   /** Parents that expand into occurrences (own rule, never instances'). */
   async findRecurringParents(userId: string): Promise<TaskDocument[]> {
     return this.col

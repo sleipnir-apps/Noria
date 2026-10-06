@@ -22,4 +22,14 @@ describe("Health route", () => {
     expect(body.database).toBe("connected");
     expect(body.timestamp).toBeString();
   });
+
+  it("GET /health (racine, sans préfixe /api/v1) répond aussi 200", async () => {
+    const res = await app.inject({ method: "GET", url: "/health" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("ok");
+    expect(body.database).toBe("connected");
+    expect(body.timestamp).toBeString();
+  });
 });

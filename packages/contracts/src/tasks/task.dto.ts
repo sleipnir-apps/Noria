@@ -65,6 +65,30 @@ export const TaskOverdueResponseSchema = z.object({
 });
 export type TaskOverdueResponse = z.infer<typeof TaskOverdueResponseSchema>;
 
+/** GET /tasks/upcoming?days=… — window in days from today (device-local), clamped by the API. */
+export const TaskUpcomingQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(60).default(14).optional(),
+});
+export type TaskUpcomingQuery = z.infer<typeof TaskUpcomingQuerySchema>;
+
+/**
+ * One day bucket of the "À venir" view. `date` is the device-local calendar
+ * day "YYYY-MM-DD"; days without task are omitted by the server.
+ */
+export const UpcomingDaySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  tasks: z.array(TaskSchema),
+});
+export type UpcomingDay = z.infer<typeof UpcomingDaySchema>;
+
+export const TaskUpcomingResponseSchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  days: z.number().int().min(1).max(60),
+  data: z.array(UpcomingDaySchema),
+});
+export type TaskUpcomingResponse = z.infer<typeof TaskUpcomingResponseSchema>;
+
 // ── Offline-first sync (pull + push) ─────────────────────────────────────────
 
 /** GET /sync?since=<iso> — last-write-wins watermark sync. */

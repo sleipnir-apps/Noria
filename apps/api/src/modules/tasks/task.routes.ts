@@ -4,10 +4,18 @@ import {
   OccurrenceUpdateSchema,
   TaskFiltersSchema,
   TaskRangeQuerySchema,
+  TaskUpcomingQuerySchema,
   UpdateTaskSchema,
 } from "@template/contracts";
 import { TaskService } from "./task.service";
 import { AppError } from "../../lib/errors/AppError";
+
+/** ISO instant parser (same validation as the service's). */
+function parseInstant(value: string): Date {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw AppError.validation("Date invalide", [value]);
+  return date;
+}
 import {
   createTaskRouteSchema,
   listTasksRouteSchema,
@@ -16,6 +24,7 @@ import {
   rangeTasksRouteSchema,
   taskParamsSchema,
   updateTaskRouteSchema,
+  upcomingTasksRouteSchema,
 } from "./task.schema";
 
 type AuthRequest = FastifyRequest & { user: { sub: string } };
@@ -69,6 +78,22 @@ export async function taskRoutes(app: FastifyInstance) {
       const now = (request.query as { now?: string } | undefined)?.now;
       const data = await service.getOverdue(request.user.sub, now);
       return reply.send({ since: now ?? new Date().toISOString(), data });
+    }
+  );
+
+  // GET /tasks/upcoming — grouped by day for the "À venir" tab
+  app.get(
+    "/tasks/upcoming",
+    { preValidation: [app.authenticate], schema: upcomingTasksRouteSchema },
+    async (request: AuthRequest, reply: FastifyReply) => {
+      const parsed = TaskUpcomingQuerySchema.safeParse(request.query);
+      if (!parsed.success) throw AppError.validation("Fenêtre invalide", parsed.error.issues);
+      const days = parsed.data.days ?? 14;
+      // `now` is a test hook (anchored clock); production requests omit it.
+      const nowOverride = (request.query as { now?: string } | undefined)?.now;
+      const now = nowOverride !== undefined ? parseInstant(nowOverride) : new Date();
+      const data = await service.getUpcoming(request.user.sub, now, days);
+      return reply.send(data);
     }
   );
 

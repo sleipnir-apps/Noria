@@ -6,6 +6,7 @@ import { registerErrorHandler } from "./plugins/error-handler";
 import { registerMongoDB } from "./plugins/mongodb";
 import { registerRateLimit } from "./plugins/rate-limit";
 import { registerSwagger } from "./plugins/swagger";
+import { healthController } from "./modules/health/health.controller";
 import { healthRoutes } from "./modules/health/health.route";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
@@ -57,5 +58,27 @@ export async function buildApp() {
     { prefix: API_PREFIX }
   );
 
+  // Root-level health probe (deployment platforms ping GET /health): reuse
+  // the same controller, no /api/v1 prefix. /api/v1/health stays for the app.
+  await app.get("/health", ROOT_HEALTH_SCHEMA, healthController);
+
   return app;
 }
+
+/** Same response schema as /api/v1/health, at the deployment root. */
+const ROOT_HEALTH_SCHEMA = {
+  schema: {
+    tags: ["Health"],
+    summary: "Check API and database status (root level, no /api/v1 prefix)",
+    response: {
+      200: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          database: { type: "string" },
+          timestamp: { type: "string" },
+        },
+      },
+    },
+  } as const,
+} as const;

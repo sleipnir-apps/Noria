@@ -10,7 +10,9 @@ import type {
   SyncPushResponse,
   Task,
   TaskFilters,
+  TaskUpcomingResponse,
   UpdateTaskDto,
+  UpcomingDay,
 } from "@template/contracts";
 import { AppError } from "../../lib/errors/AppError";
 import { isSet, TaskRepository } from "./task.repository";
@@ -36,6 +38,21 @@ function parseInstant(value: string): Date {
 
 function isStrictlyLater(candidate: Date, reference: Date): boolean {
   return candidate.getTime() > reference.getTime();
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Midnight (00:00:00.000Z) of the UTC calendar day containing `date`. */
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+/** "YYYY-MM-DD" day key of an instant on the UTC calendar. */
+function utcDayKey(date: Date): string {
+  const year = String(date.getUTCFullYear()).padStart(4, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function toDto(doc: TaskDocument): Task {
@@ -269,6 +286,63 @@ export class TaskService {
     }
 
     return sortRangeItems(overdue);
+  }
+
+  /**
+   * "À venir": open dated tasks + computed occurrences of the [today, today +
+   * days) window, grouped by local calendar day and sorted chronologically.
+   * Same fusion rules as getRange: occurrences already materialized are
+   * excluded (their instance represents them); DONE/ARCHIVED/soft-deleted
+   * documents never appear. Group days follow the server's UTC calendar
+   * (device-local grouping is the client's job, offline-first).
+   */
+  async getUpcoming(userId: string, now: Date, days: number): Promise<TaskUpcomingResponse> {
+    const start = startOfUtcDay(now);
+    const end = new Date(start.getTime() + days * MS_PER_DAY);
+
+    // Same occurrence fusion as the calendar range, but only open documents
+    // (findDatedUpcoming excludes DONE/ARCHIVED; computed occurrences are
+    // always TODO and instances are filtered by status below).
+    const [datedDocs, materialized, parents] = await Promise.all([
+      this.repo.findDatedUpcoming(userId, start, end),
+      this.repo.findInstancesByOriginalDateRange(userId, start, end),
+      this.repo.findRecurringParents(userId),
+    ]);
+
+    const instanceKey = (parentTaskId: string | undefined | null, instant: Date): string =>
+      `${parentTaskId ?? ""}:${instant.getTime()}`;
+
+    const materializedKeys = new Set(
+      materialized.map((doc) => instanceKey(doc.parentTaskId, doc.originalDueDate!))
+    );
+
+    const items: Task[] = datedDocs
+      .filter((doc) => !isRecurringParent(doc))
+      .map((doc) => toDto(doc));
+
+    for (const parent of parents) {
+      if (!isSet(parent.dueDate)) continue; // unreachable: a rule implies a due date
+      const dates = expandOccurrences(parent.recurrenceRule!, parent.dueDate, { start, end });
+      for (const instant of dates) {
+        if (materializedKeys.has(instanceKey(parent._id!.toString(), instant))) continue;
+        items.push(toOccurrenceDto(parent, instant));
+      }
+    }
+
+    const sorted = sortRangeItems(items);
+
+    const data: UpcomingDay[] = [];
+    for (const item of sorted) {
+      const key = utcDayKey(new Date(item.dueDate!));
+      let bucket = data.at(-1);
+      if (bucket === undefined || bucket.date !== key) {
+        bucket = { date: key, tasks: [] };
+        data.push(bucket);
+      }
+      bucket.tasks.push(item);
+    }
+
+    return { start: start.toISOString(), end: end.toISOString(), days, data };
   }
 
   /**
