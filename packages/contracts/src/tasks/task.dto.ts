@@ -23,6 +23,9 @@ export const TaskSchema = z.object({
   parentTaskId: z.string().optional(),
   originalDueDate: z.iso.datetime().optional(),
   deletedAt: z.iso.datetime().optional(),
+  // True on computed occurrences (synthetic id `occ:<parentId>:<iso>`) — the
+  // response carries the parent's own fields underneath.
+  isOccurrence: z.boolean().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -64,6 +67,35 @@ export const TaskOverdueResponseSchema = z.object({
   data: z.array(TaskSchema),
 });
 export type TaskOverdueResponse = z.infer<typeof TaskOverdueResponseSchema>;
+
+// ── "À venir" (upcoming) ──────────────────────────────────────────────────────
+
+/**
+ * GET /tasks/upcoming?days=14 — open dated tasks + computed occurrences of
+ * active recurring parents over the next `days` days. `now` mirrors
+ * GET /tasks/overdue's anchor param (server clock when omitted).
+ */
+export const TaskUpcomingQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(60).default(14),
+  now: IsoInstantSchema.optional(),
+});
+export type TaskUpcomingQuery = z.infer<typeof TaskUpcomingQuerySchema>;
+
+/** One chronological day: UTC day key "YYYY-MM-DD" + its tasks/occurrences. */
+export const TaskUpcomingDaySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  tasks: z.array(TaskSchema),
+});
+export type TaskUpcomingDay = z.infer<typeof TaskUpcomingDaySchema>;
+
+/** Days sorted chronologically, days without tasks skipped. */
+export const TaskUpcomingResponseSchema = z.object({
+  start: z.iso.datetime(),
+  end: z.iso.datetime(),
+  days: z.number().int(),
+  data: z.array(TaskUpcomingDaySchema),
+});
+export type TaskUpcomingResponse = z.infer<typeof TaskUpcomingResponseSchema>;
 
 // ── Offline-first sync (pull + push) ─────────────────────────────────────────
 

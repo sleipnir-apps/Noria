@@ -1,16 +1,23 @@
-import { Pressable, StyleSheet, TextInput, View } from "react-native";
+import { useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Radius, Spacing } from "@/constants/theme";
 import { ThemedText } from "@/components/themed-text";
+import { DatePickerSheet } from "@/components/tasks/date-picker-sheet";
+import { TimePickerSheet } from "@/components/tasks/time-picker-sheet";
 import { useTheme } from "@/hooks/use-theme";
-import { localDateText } from "@/features/tasks/local-date";
+import { formatChipDate, localDateText, parseLocalDayKey } from "@/features/tasks/local-date";
 
-const DEFAULT_TIME = "09:00";
+/** Stored day key → human chip label; unparsable drafts just offer picking. */
+const dateLabelOf = (dateText: string): string => {
+  const parsed = parseLocalDayKey(dateText);
+  return parsed === null ? "Choisir une date" : formatChipDate(parsed.toISOString());
+};
 
 /**
- * Due date (+ optional time) editor shared on every platform: ISO text input
- * "AAAA-MM-JJ" with quick "Aujourd'hui / Demain" chips, and a time toggle
- * ("has_time"). Empty date = backlog item.
+ * Due date (+ optional time) editor shared on every platform: a calendar sheet
+ * picks the day, steppers pick the time — no free-text entry at all, so only
+ * valid values reach the form. Empty date = backlog item.
  */
 export function DueDateFields({
   dateText,
@@ -24,89 +31,89 @@ export function DueDateFields({
   onTimeChange: (timeText: string) => void;
 }) {
   const theme = useTheme();
+  const [showDateSheet, setShowDateSheet] = useState(false);
+  const [showTimeSheet, setShowTimeSheet] = useState(false);
   const today = localDateText(new Date());
   const tomorrow = localDateText(new Date(Date.now() + 24 * 60 * 60 * 1000));
   const hasTime = timeText !== "";
 
-  const toggleTime = (): void => {
-    onTimeChange(hasTime ? "" : DEFAULT_TIME);
+  const removeDate = (): void => {
+    onDateChange("");
+    onTimeChange("");
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.adder}>
-        <TextInput
-          value={dateText}
-          onChangeText={onDateChange}
-          placeholder="AAAA-MM-JJ (vide = backlog)"
-          placeholderTextColor={theme.textSecondary}
-          keyboardType="numbers-and-punctuation"
-          maxLength={10}
+        <Pressable
+          onPress={() => setShowDateSheet(true)}
           style={[
-            styles.input,
-            { color: theme.text, borderColor: theme.border, backgroundColor: theme.background },
+            styles.dateButton,
+            { borderColor: theme.border, backgroundColor: theme.backgroundElement },
           ]}
           accessibilityLabel="Échéance"
-        />
+        >
+          <Ionicons name="calendar" size={14} color={theme.textSecondary} />
+          <ThemedText type="small" themeColor={dateText === "" ? "textSecondary" : "text"}>
+            {dateLabelOf(dateText)}
+          </ThemedText>
+        </Pressable>
         <Pressable
           onPress={() => onDateChange(today)}
           style={[styles.chip, { backgroundColor: theme.backgroundSelected }]}
+          accessibilityLabel="Choisir aujourd'hui"
         >
           <ThemedText type="small">Aujourd'hui</ThemedText>
         </Pressable>
         <Pressable
           onPress={() => onDateChange(tomorrow)}
           style={[styles.chip, { backgroundColor: theme.backgroundSelected }]}
+          accessibilityLabel="Choisir demain"
         >
           <ThemedText type="small">Demain</ThemedText>
         </Pressable>
       </View>
 
       {dateText !== "" && (
-        <View style={styles.timeRow}>
-          <Pressable
-            onPress={toggleTime}
-            accessibilityLabel={hasTime ? "Retirer l'heure" : "Ajouter une heure"}
-            style={[
-              styles.chip,
-              { backgroundColor: hasTime ? theme.primary : theme.backgroundSelected },
-            ]}
-          >
-            <Ionicons
-              name="time"
-              size={14}
-              color={hasTime ? theme.onPrimary : theme.textSecondary}
-            />
-            <ThemedText type="small" themeColor={hasTime ? "onPrimary" : "text"}>
-              Heure
-            </ThemedText>
-          </Pressable>
-          {hasTime && (
-            <TextInput
-              value={timeText}
-              onChangeText={onTimeChange}
-              placeholder="HH:MM"
-              placeholderTextColor={theme.textSecondary}
-              keyboardType="numbers-and-punctuation"
-              maxLength={5}
-              style={[
-                styles.input,
-                styles.timeInput,
-                { color: theme.text, borderColor: theme.border, backgroundColor: theme.background },
-              ]}
-              accessibilityLabel="Heure"
-            />
-          )}
-        </View>
+        <Pressable
+          onPress={() => setShowTimeSheet(true)}
+          style={[
+            styles.chip,
+            {
+              backgroundColor: hasTime ? theme.primary : theme.backgroundSelected,
+              alignSelf: "flex-start",
+            },
+          ]}
+          accessibilityLabel={hasTime ? "Modifier l'heure" : "Ajouter une heure"}
+        >
+          <Ionicons name="time" size={14} color={hasTime ? theme.onPrimary : theme.textSecondary} />
+          <ThemedText type="small" themeColor={hasTime ? "onPrimary" : "text"}>
+            {hasTime ? timeText : "Heure"}
+          </ThemedText>
+        </Pressable>
       )}
 
       {dateText !== "" && (
-        <Pressable onPress={() => onDateChange("")} hitSlop={6}>
+        <Pressable onPress={removeDate} hitSlop={6}>
           <ThemedText type="linkPrimary" style={styles.link}>
             Retirer la date (revenir au backlog)
           </ThemedText>
         </Pressable>
       )}
+
+      <DatePickerSheet
+        visible={showDateSheet}
+        selectedDateText={dateText}
+        onPick={onDateChange}
+        onClose={() => setShowDateSheet(false)}
+      />
+      <TimePickerSheet
+        visible={showTimeSheet}
+        timeText={timeText}
+        onPick={onTimeChange}
+        onClear={() => onTimeChange("")}
+        onClose={() => setShowTimeSheet(false)}
+      />
     </View>
   );
 }
@@ -120,10 +127,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.two,
   },
-  timeRow: {
+  dateButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.two,
+    gap: Spacing.half,
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
   },
   chip: {
     flexDirection: "row",
@@ -132,18 +144,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sm,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: Radius.sm,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two,
-    fontSize: 14,
-  },
-  timeInput: {
-    width: 80,
-    flex: 0,
   },
   link: {
     alignSelf: "flex-start",

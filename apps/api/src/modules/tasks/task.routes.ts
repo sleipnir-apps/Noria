@@ -4,6 +4,7 @@ import {
   OccurrenceUpdateSchema,
   TaskFiltersSchema,
   TaskRangeQuerySchema,
+  TaskUpcomingQuerySchema,
   UpdateTaskSchema,
 } from "@template/contracts";
 import { TaskService } from "./task.service";
@@ -16,6 +17,7 @@ import {
   rangeTasksRouteSchema,
   taskParamsSchema,
   updateTaskRouteSchema,
+  upcomingTasksRouteSchema,
 } from "./task.schema";
 
 type AuthRequest = FastifyRequest & { user: { sub: string } };
@@ -58,6 +60,19 @@ export async function taskRoutes(app: FastifyInstance) {
       const { start, end } = parsed.data;
       const data = await service.getRange(request.user.sub, start, end);
       return reply.send({ start, end, data });
+    }
+  );
+
+  // GET /tasks/upcoming — open tasks + occurrences for the next `days` days
+  app.get(
+    "/tasks/upcoming",
+    { preValidation: [app.authenticate], schema: upcomingTasksRouteSchema },
+    async (request: AuthRequest, reply: FastifyReply) => {
+      const parsed = TaskUpcomingQuerySchema.safeParse(request.query);
+      if (!parsed.success) throw AppError.validation("Fenêtre invalide", parsed.error.issues);
+      const { days, now } = parsed.data;
+      const data = await service.getUpcoming(request.user.sub, days, now);
+      return reply.send(data);
     }
   );
 

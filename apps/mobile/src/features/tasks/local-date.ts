@@ -18,8 +18,8 @@ export function localMidnightIso(date: Date): string {
 }
 
 /** Local calendar day key "YYYY-MM-DD" of an ISO instant, on this device. */
-export function localDayKey(iso: string, reference: Date = new Date(iso)): string {
-  return `${reference.getFullYear()}-${pad(reference.getMonth() + 1)}-${pad(reference.getDate())}`;
+export function localDayKey(iso: string): string {
+  return localDateText(new Date(iso));
 }
 
 /** [start, end) window of a local calendar day. */
@@ -32,6 +32,32 @@ export function dayWindow(date: Date): { start: Date; end: Date } {
 /** Today (device clock) as [start of day, start of next day), local calendar. */
 export function todayWindow(now: Date = new Date()): { start: Date; end: Date } {
   return dayWindow(now);
+}
+
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Parse a local "YYYY-MM-DD" day key as local noon (DST-safe). Parsing with
+ * `new Date("YYYY-MM-DD")` would anchor on UTC midnight and shift the whole
+ * calendar day in non-UTC timezones — never do that.
+ */
+export function parseLocalDayKey(dateKey: string): Date | null {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) return null;
+  const date = new Date(year, month - 1, day, 12);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Group header for a day key: "Aujourd'hui", "Demain", else "jeu. 15 janv.". */
+export function relativeDayLabel(dateKey: string, now: Date): string {
+  const target = parseLocalDayKey(dateKey);
+  if (target === null) return dateKey;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  const diffDays = Math.round((target.getTime() - today.getTime()) / MS_PER_DAY);
+  if (diffDays === 0) return "Aujourd'hui";
+  if (diffDays === 1) return "Demain";
+  return formatChipDate(target.toISOString());
 }
 
 /** "YYYY-MM-DD" text of a local calendar day (form input format). */
