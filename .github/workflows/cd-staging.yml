@@ -17,7 +17,6 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SUBDOMAIN_SUFFIX: noria.staging.sleipnir.ovh
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  STAGING_SUBDOMAIN: noria.staging.sleipnir.ovh
 
 jobs:
   # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
@@ -748,7 +747,7 @@ jobs:
             "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
             "JWT_ACCESS_EXPIRES_IN=15m" \
             "JWT_REFRESH_EXPIRES_IN=7d" \
-            "CORS_ORIGINS=https://${{ env.STAGING_SUBDOMAIN }}" \
+            "CORS_ORIGINS=https://${{ env.SUBDOMAIN_SUFFIX }}" \
             > /tmp/staging-deploy/.env
           chmod 600 /tmp/staging-deploy/.env
 
@@ -830,8 +829,8 @@ jobs:
 
       - name: Health check
         run: |
-          FRONTEND_URL="https://${{ env.STAGING_SUBDOMAIN }}"
-          BACKEND_URL="https://api.${{ env.SUBDOMAIN_SUFFIX }}"
+          FRONTEND_URL="https://${{ env.SUBDOMAIN_SUFFIX }}"
+          BACKEND_URL="https://staging.api.${{ env.SUBDOMAIN_SUFFIX }}"
 
           check_url() {
             local url=$1
