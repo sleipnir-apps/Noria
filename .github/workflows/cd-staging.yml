@@ -17,7 +17,6 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SUBDOMAIN_SUFFIX: noria.staging.sleipnir.ovh
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  STAGING_SUBDOMAIN: staging.noria.staging.sleipnir.ovh
 
 jobs:
   # ─── Garde-fou : ne rien lancer tant que le template n'est pas ────
@@ -685,7 +684,7 @@ jobs:
           cache-from: type=gha,scope=staging-frontend
           cache-to: type=gha,scope=staging-frontend,mode=max
           build-args: |
-            EXPO_PUBLIC_API_URL=https://staging.api.${{ env.SUBDOMAIN_SUFFIX }}
+            EXPO_PUBLIC_API_URL=https://api.${{ env.SUBDOMAIN_SUFFIX }}
 
       - name: Fetch APPS Secrets
         uses: Infisical/secrets-action@v1.0.9
@@ -748,7 +747,7 @@ jobs:
             "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}" \
             "JWT_ACCESS_EXPIRES_IN=15m" \
             "JWT_REFRESH_EXPIRES_IN=7d" \
-            "CORS_ORIGINS=https://${{ env.STAGING_SUBDOMAIN }}" \
+            "CORS_ORIGINS=https://${{ env.SUBDOMAIN_SUFFIX }}" \
             > /tmp/staging-deploy/.env
           chmod 600 /tmp/staging-deploy/.env
 
@@ -789,10 +788,10 @@ jobs:
               "    env_file: ~/${STAGING_DIR}/backend/.env" \
               "    labels:" \
               "      - \"traefik.enable=true\"" \
-              "      - \"traefik.http.routers.${PROJECT}-staging-api.rule=Host(\`staging.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api.rule=Host(\`api.${SUBDOMAIN}\`)\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-api.entrypoints=websecure\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-api.tls.certresolver=letsencrypt\"" \
-              "      - \"traefik.http.routers.${PROJECT}-staging-api-http.rule=Host(\`staging.api.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-api-http.rule=Host(\`api.${SUBDOMAIN}\`)\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-api-http.entrypoints=web\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-api-http.middlewares=${PROJECT}-staging-api-redirect-to-https\"" \
               "      - \"traefik.http.middlewares.${PROJECT}-staging-api-redirect-to-https.redirectscheme.scheme=https\"" \
@@ -810,10 +809,10 @@ jobs:
               "    restart: unless-stopped" \
               "    labels:" \
               "      - \"traefik.enable=true\"" \
-              "      - \"traefik.http.routers.${PROJECT}-staging-front.rule=Host(\`staging.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front.rule=Host(\`${SUBDOMAIN}\`)\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-front.entrypoints=websecure\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-front.tls.certresolver=letsencrypt\"" \
-              "      - \"traefik.http.routers.${PROJECT}-staging-front-http.rule=Host(\`staging.${SUBDOMAIN}\`)\"" \
+              "      - \"traefik.http.routers.${PROJECT}-staging-front-http.rule=Host(\`${SUBDOMAIN}\`)\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-front-http.entrypoints=web\"" \
               "      - \"traefik.http.routers.${PROJECT}-staging-front-http.middlewares=${PROJECT}-staging-front-redirect-to-https\"" \
               "      - \"traefik.http.middlewares.${PROJECT}-staging-front-redirect-to-https.redirectscheme.scheme=https\"" \
@@ -830,7 +829,7 @@ jobs:
 
       - name: Health check
         run: |
-          FRONTEND_URL="https://${{ env.STAGING_SUBDOMAIN }}"
+          FRONTEND_URL="https://${{ env.SUBDOMAIN_SUFFIX }}"
           BACKEND_URL="https://staging.api.${{ env.SUBDOMAIN_SUFFIX }}"
 
           check_url() {

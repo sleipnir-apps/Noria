@@ -24,17 +24,29 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Accueil",
-          tabBarLabel: "Accueil",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+          title: "Aujourd'hui",
+          tabBarLabel: "Aujourd'hui",
+          tabBarIcon: ({ color, size }) => <Ionicons name="today" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="items"
+        name="upcoming"
         options={{
-          title: "Mes Items",
-          tabBarLabel: "Items",
-          tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
+          title: "À venir",
+          tabBarLabel: "À venir",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar-number" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="backlog"
+        options={{
+          title: "Backlog",
+          tabBarLabel: "Backlog",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="folder-open" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen

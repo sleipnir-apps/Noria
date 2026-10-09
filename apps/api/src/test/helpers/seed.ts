@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
+import type { RecurrenceRule, TaskPriority, TaskStatus, TaskSubtask } from "@template/contracts";
 
 export async function seedUser(
   app: FastifyInstance,
@@ -39,5 +40,60 @@ export async function seedItem(
     updatedAt: new Date(),
   });
 
+  return { id: result.insertedId.toString() };
+}
+
+/**
+ * Insert a raw task document matching the repository's TaskDocument shape
+ * (userId as string, Date fields as Date). Optional fields stay absent unless
+ * explicitly provided — passing `null` also leaves the field absent, so tests
+ * can express "backlog task" as dueDate: null.
+ */
+export async function seedTask(
+  app: FastifyInstance,
+  userId: string,
+  overrides: {
+    title?: string;
+    description?: string;
+    priority?: TaskPriority;
+    status?: TaskStatus;
+    dueDate?: Date | null;
+    hasTime?: boolean;
+    tags?: string[];
+    subtasks?: TaskSubtask[];
+    recurrenceRule?: RecurrenceRule | null;
+    parentTaskId?: string;
+    originalDueDate?: Date;
+    deletedAt?: Date;
+    createdAt?: Date;
+    updatedAt?: Date;
+  } = {}
+) {
+  const now = new Date();
+  const doc: Record<string, unknown> = {
+    userId,
+    title: overrides.title ?? "Tâche de test",
+    priority: overrides.priority ?? "P3",
+    status: overrides.status ?? "TODO",
+    hasTime: overrides.hasTime ?? false,
+    tags: overrides.tags ?? [],
+    subtasks: overrides.subtasks ?? [],
+    createdAt: overrides.createdAt ?? now,
+    updatedAt: overrides.updatedAt ?? now,
+  };
+  const optional: Array<[string, unknown]> = [
+    ["description", overrides.description],
+    ["dueDate", overrides.dueDate],
+    ["recurrenceRule", overrides.recurrenceRule],
+    ["parentTaskId", overrides.parentTaskId],
+    ["originalDueDate", overrides.originalDueDate],
+    ["deletedAt", overrides.deletedAt],
+  ];
+  for (const [key, value] of optional) {
+    // Skip null as well as undefined: a BSON null would break `field === undefined` checks.
+    if (value !== undefined && value !== null) doc[key] = value;
+  }
+
+  const result = await app.db.collection("tasks").insertOne(doc);
   return { id: result.insertedId.toString() };
 }

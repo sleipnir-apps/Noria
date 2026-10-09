@@ -1,15 +1,19 @@
 import Fastify from "fastify";
 import { env } from "./config/env";
+import { API_PREFIX } from "./config/api-prefix";
 import { registerCors } from "./plugins/cors";
 import { registerErrorHandler } from "./plugins/error-handler";
 import { registerMongoDB } from "./plugins/mongodb";
 import { registerRateLimit } from "./plugins/rate-limit";
 import { registerSwagger } from "./plugins/swagger";
-import { healthRoutes } from "./modules/health/health.route";
+import { healthRoutes, rootHealthRoutes } from "./modules/health/health.route";
 import { registerAuth } from "./plugins/auth";
 import { authRoutes } from "./modules/auth/auth.routes";
 import { adminRoutes } from "./modules/admin/admin.routes";
 import { itemRoutes } from "./modules/items/item.routes";
+import { taskRoutes } from "./modules/tasks/task.routes";
+import { syncRoutes } from "./modules/tasks/sync.routes";
+import type { FastifyInstance } from "fastify";
 
 export async function buildApp() {
   const app = Fastify({
@@ -39,11 +43,22 @@ export async function buildApp() {
   // Error handler (après les plugins)
   registerErrorHandler(app);
 
-  // Routes
-  await app.register(healthRoutes);
-  await app.register(authRoutes);
-  await app.register(adminRoutes);
-  await app.register(itemRoutes);
+  // Routes — every module lives under the same /api/v1 prefix; the mobile
+  // EXPO_PUBLIC_API_URL points at `<host>:<port>/api/v1`.
+  await app.register(
+    async (api: FastifyInstance) => {
+      await api.register(healthRoutes);
+      await api.register(authRoutes);
+      await api.register(adminRoutes);
+      await api.register(itemRoutes);
+      await api.register(taskRoutes);
+      await api.register(syncRoutes);
+    },
+    { prefix: API_PREFIX }
+  );
+
+  // Liveness probe at the origin root (uptime monitoring hits GET /health).
+  await rootHealthRoutes(app);
 
   return app;
 }

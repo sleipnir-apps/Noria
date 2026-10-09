@@ -1,10 +1,14 @@
 import { Stack } from "expo-router";
 import { useColorScheme } from "react-native";
 import { Colors } from "@/constants/theme";
+import { useTaskSync } from "@/features/tasks/use-task-sync";
 
 export default function AppLayout() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === "dark" ? "dark" : "light"];
+
+  // Hydrate the offline dataset + run the sync engine while signed in.
+  useTaskSync();
 
   return (
     <Stack
@@ -17,7 +21,7 @@ export default function AppLayout() {
       }}
     >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="items/[id]" options={{ title: "Détail Item" }} />
+      <Stack.Screen name="task-editor" options={{ title: "Tâche" }} />
     </Stack>
   );
 }
